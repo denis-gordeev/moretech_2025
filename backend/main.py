@@ -19,6 +19,7 @@ from log_analyzer import PostgreSQLLogAnalyzer
 from config_analyzer import PostgreSQLConfigAnalyzer
 from cache_warmup import CacheWarmupService
 from example_generator import ExampleGenerator
+from table_stats_service import TableStatsService
 from config import settings
 
 # Настройка логирования
@@ -48,6 +49,7 @@ log_analyzer = PostgreSQLLogAnalyzer()
 config_analyzer = PostgreSQLConfigAnalyzer()
 cache_warmup = CacheWarmupService()
 example_generator = ExampleGenerator()
+table_stats_service = TableStatsService()
 
 
 @app.on_event("startup")
@@ -78,7 +80,7 @@ async def startup_cache_warmup():
         await asyncio.sleep(2)
         
         logger.info("Starting background cache warmup...")
-        result = await cache_warmup.warmup_cache(max_queries=3)  # Кэшируем только 3 запроса при запуске
+        result = await cache_warmup.warmup_cache(max_queries=20)  # Кэшируем все примеры при запуске
         
         logger.info(f"Background cache warmup completed: {result['processed']} queries cached")
         

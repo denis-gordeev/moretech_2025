@@ -4,7 +4,7 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # Database settings
-    database_url: str = "postgresql://analyzer_user:analyzer_pass@localhost:5432/query_analyzer"
+    database_url: str = "postgresql://analyzer_user:analyzer_pass@localhost:5433/query_analyzer"
     
     # LLM settings
     openai_api_key: str
