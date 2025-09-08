@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  # Внешний PostgreSQL сервис (закомментирован, так как используется внешний)
+  # postgres:
+  #   image: postgres:15
+  #   environment:
+  #     POSTGRES_DB: query_analyzer
+  #     POSTGRES_USER: analyzer_user
+  #     POSTGRES_PASSWORD: analyzer_pass
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #     - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+  #   command: >
+  #     postgres
+  #     -c shared_preload_libraries=pg_stat_statements
+  #     -c pg_stat_statements.track=all
+  #     -c pg_stat_statements.max=10000
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Подключение к внешнему PostgreSQL (настройте в .env файле)
+      - DATABASE_URL=${DATABASE_URL:-postgresql://analyzer_user:analyzer_pass@host.docker.internal:5432/query_analyzer}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    # Убираем зависимость от внутреннего postgres
+    # depends_on:
+    #   - postgres
+    volumes:
+      - ./backend:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    # Добавляем extra_hosts для доступа к внешнему PostgreSQL
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm start
+
+# volumes:
+#   postgres_data:
