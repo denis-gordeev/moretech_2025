@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from typing import List
 import logging
+import asyncio
 from datetime import datetime
 
 from models import (
@@ -14,6 +15,9 @@ from models import (
 )
 from database import PostgreSQLAnalyzer
 from llm_service import LLMAnalyzer
+from log_analyzer import PostgreSQLLogAnalyzer
+from config_analyzer import PostgreSQLConfigAnalyzer
+from cache_warmup import CacheWarmupService
 from config import settings
 
 # Настройка логирования
@@ -39,6 +43,44 @@ app.add_middleware(
 # Инициализация сервисов
 db_analyzer = PostgreSQLAnalyzer()
 llm_analyzer = LLMAnalyzer()
+log_analyzer = PostgreSQLLogAnalyzer()
+config_analyzer = PostgreSQLConfigAnalyzer()
+cache_warmup = CacheWarmupService()
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Событие запуска приложения - предварительное кэширование"""
+    logger.info("Application startup - starting cache warmup...")
+    
+    # Проверяем подключения
+    try:
+        db_connected = await db_analyzer.test_connection()
+        openai_available = await llm_analyzer.test_connection()
+        
+        if db_connected and openai_available:
+            # Запускаем кэширование в фоне
+            asyncio.create_task(startup_cache_warmup())
+        else:
+            logger.warning("Skipping cache warmup - database or OpenAI not available")
+            
+    except Exception as e:
+        logger.error(f"Startup cache warmup failed: {e}")
+
+
+async def startup_cache_warmup():
+    """Асинхронная функция для кэширования при запуске"""
+    try:
+        # Ждем немного, чтобы приложение полностью запустилось
+        await asyncio.sleep(2)
+        
+        logger.info("Starting background cache warmup...")
+        result = await cache_warmup.warmup_cache(max_queries=3)  # Кэшируем только 3 запроса при запуске
+        
+        logger.info(f"Background cache warmup completed: {result['processed']} queries cached")
+        
+    except Exception as e:
+        logger.error(f"Background cache warmup failed: {e}")
 
 
 @app.get("/", response_model=dict)
@@ -55,8 +97,8 @@ async def root():
 async def health_check():
     """Проверка здоровья сервиса"""
     try:
-        db_connected = db_analyzer.test_connection()
-        openai_available = llm_analyzer.test_connection()
+        db_connected = await db_analyzer.test_connection()
+        openai_available = await llm_analyzer.test_connection()
         
         status = "healthy" if db_connected and openai_available else "unhealthy"
         
@@ -111,7 +153,7 @@ async def analyze_query(request: QueryAnalysisRequest):
             all_queries_text = request.query
         
         # Получаем план выполнения для основного запроса
-        plan_data = analyzer.analyze_query_performance(main_query)
+        plan_data = await analyzer.analyze_query_performance(main_query)
         
         # Создаем объект плана выполнения
         execution_plan = ExecutionPlan(
@@ -124,7 +166,7 @@ async def analyze_query(request: QueryAnalysisRequest):
         
         # Анализируем с помощью LLM (передаем всю цепочку для контекста)
         logger.info("Running LLM analysis...")
-        llm_result = llm_analyzer.analyze_query_with_llm(
+        llm_result = await llm_analyzer.analyze_query_with_llm(
             all_queries_text, 
             plan_data['plan_json']
         )
@@ -153,7 +195,7 @@ async def analyze_query(request: QueryAnalysisRequest):
 async def get_database_info():
     """Получает информацию о подключенной базе данных"""
     try:
-        info = db_analyzer.get_database_info()
+        info = await db_analyzer.get_database_info()
         return info
     except Exception as e:
         logger.error(f"Failed to get database info: {e}")
@@ -167,7 +209,7 @@ async def test_database_connection(config: DatabaseConfig):
         database_url = f"postgresql://{config.username}:{config.password}@{config.host}:{config.port}/{config.database}"
         test_analyzer = PostgreSQLAnalyzer(database_url)
         
-        is_connected = test_analyzer.test_connection()
+        is_connected = await test_analyzer.test_connection()
         
         if is_connected:
             return {"status": "success", "message": "Database connection successful"}
@@ -182,50 +224,12 @@ async def test_database_connection(config: DatabaseConfig):
 @app.get("/examples")
 async def get_example_queries():
     """Возвращает примеры SQL запросов для тестирования"""
-    return {
-        "examples": [
-            {
-                "name": "Simple SELECT",
-                "query": "SELECT * FROM users WHERE email = 'john@example.com'",
-                "description": "Простой запрос с фильтрацией"
-            },
-            {
-                "name": "JOIN with aggregation",
-                "query": """
-                SELECT u.name, COUNT(o.id) as order_count, SUM(o.total_amount) as total_spent
-                FROM users u
-                LEFT JOIN orders o ON u.id = o.user_id
-                WHERE u.is_active = true
-                GROUP BY u.id, u.name
-                ORDER BY total_spent DESC
-                """,
-                "description": "Запрос с JOIN и агрегацией"
-            },
-            {
-                "name": "Complex subquery",
-                "query": """
-                SELECT * FROM users 
-                WHERE id IN (
-                    SELECT user_id FROM orders 
-                    WHERE total_amount > (
-                        SELECT AVG(total_amount) FROM orders
-                    )
-                )
-                """,
-                "description": "Запрос с подзапросом"
-            },
-            {
-                "name": "Window function",
-                "query": """
-                SELECT 
-                    name,
-                    total_amount,
-                    ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY total_amount DESC) as rank
-                FROM orders o
-                JOIN users u ON o.user_id = u.id
-                """,
-                "description": "Запрос с оконными функциями"
-            },
+    try:
+        # Загружаем примеры из test_queries.json
+        test_queries = await cache_warmup.load_test_queries()
+        
+        # Добавляем дополнительные примеры цепочек запросов
+        chain_examples = [
             {
                 "name": "Цепочка: Анализ пользователя",
                 "query": """
@@ -286,7 +290,26 @@ async def get_example_queries():
                 "description": "Цепочка запросов для анализа статистики таблиц и индексов"
             }
         ]
-    }
+        
+        # Объединяем все примеры
+        all_examples = test_queries + chain_examples
+        
+        return {
+            "examples": all_examples
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to load examples: {e}")
+        # Возвращаем базовые примеры в случае ошибки
+        return {
+            "examples": [
+                {
+                    "name": "Simple SELECT",
+                    "query": "SELECT * FROM users WHERE email = 'john@example.com'",
+                    "description": "Простой запрос с фильтрацией"
+                }
+            ]
+        }
 
 
 @app.get("/cache/stats")
@@ -315,6 +338,107 @@ async def clear_cache():
     except Exception as e:
         logger.error(f"Failed to clear cache: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to clear cache: {str(e)}")
+
+
+@app.get("/logs/analyze")
+async def analyze_logs(hours_back: int = 24):
+    """Анализирует логи PostgreSQL"""
+    try:
+        analysis = await log_analyzer.analyze_logs(hours_back)
+        return {
+            "status": "success",
+            "analysis": analysis
+        }
+    except Exception as e:
+        logger.error(f"Failed to analyze logs: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to analyze logs: {str(e)}")
+
+
+@app.get("/config/analyze")
+async def analyze_configuration():
+    """Анализирует конфигурацию PostgreSQL"""
+    try:
+        analysis = await config_analyzer.get_configuration_analysis()
+        return {
+            "status": "success",
+            "analysis": analysis
+        }
+    except Exception as e:
+        logger.error(f"Failed to analyze configuration: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to analyze configuration: {str(e)}")
+
+
+@app.get("/health/full")
+async def full_health_check():
+    """Полная проверка здоровья системы включая логи и конфигурацию"""
+    try:
+        # Базовая проверка здоровья
+        db_connected = await db_analyzer.test_connection()
+        openai_available = await llm_analyzer.test_connection()
+        
+        # Анализ конфигурации
+        config_analysis = await config_analyzer.get_configuration_analysis()
+        
+        # Анализ логов за последний час
+        log_analysis = await log_analyzer.analyze_logs(1)
+        
+        # Определяем общий статус
+        overall_status = "healthy"
+        if not db_connected or not openai_available:
+            overall_status = "unhealthy"
+        elif config_analysis['analysis']['overall_health'] != 'good':
+            overall_status = "degraded"
+        elif log_analysis['summary']['total_errors'] > 10:
+            overall_status = "degraded"
+        
+        return {
+            "status": overall_status,
+            "timestamp": datetime.now().isoformat(),
+            "database_connected": db_connected,
+            "openai_available": openai_available,
+            "configuration_health": config_analysis['analysis']['overall_health'],
+            "recent_errors": log_analysis['summary']['total_errors'],
+            "configuration_issues": config_analysis['analysis']['total_issues'],
+            "recommendations": {
+                "config": config_analysis['recommendations'][:3],  # Топ-3 рекомендации
+                "logs": log_analysis['summary']['recommendations'][:3]
+            }
+        }
+    except Exception as e:
+        logger.error(f"Full health check failed: {e}")
+        return {
+            "status": "unhealthy",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        }
+
+
+@app.post("/cache/warmup")
+async def warmup_cache(max_queries: int = 5):
+    """Предварительно кэширует тестовые запросы"""
+    try:
+        result = await cache_warmup.warmup_cache(max_queries)
+        return {
+            "status": "success",
+            "warmup_result": result
+        }
+    except Exception as e:
+        logger.error(f"Cache warmup failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Cache warmup failed: {str(e)}")
+
+
+@app.post("/cache/test")
+async def test_cache_hit(request: QueryAnalysisRequest):
+    """Тестирует попадание в кэш для конкретного запроса"""
+    try:
+        result = await cache_warmup.test_cache_hit(request.query)
+        return {
+            "status": "success",
+            "test_result": result
+        }
+    except Exception as e:
+        logger.error(f"Cache test failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Cache test failed: {str(e)}")
 
 
 if __name__ == "__main__":

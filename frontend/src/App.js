@@ -6,6 +6,7 @@ import ResourceMetrics from './components/ResourceMetrics';
 import Recommendations from './components/Recommendations';
 import Warnings from './components/Warnings';
 import HealthStatus from './components/HealthStatus';
+import RewrittenQuery from './components/RewrittenQuery';
 import { queryAnalyzerAPI } from './services/api';
 
 function App() {
@@ -149,6 +150,12 @@ function App() {
         {/* Results Tab */}
         {activeTab === 'results' && analysis && (
           <div className="space-y-6">
+            {/* Rewritten Query */}
+            <RewrittenQuery 
+              rewrittenQuery={analysis.rewritten_query} 
+              originalQuery={analysis.query} 
+            />
+
             {/* Execution Plan */}
             <ExecutionPlan executionPlan={analysis.execution_plan} />
 
@@ -189,6 +196,12 @@ function App() {
                   <span className="font-medium text-gray-700">Предупреждений:</span>
                   <span className="ml-2 text-gray-600">
                     {analysis.warnings.length}
+                  </span>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-700">Исправленный запрос:</span>
+                  <span className="ml-2 text-gray-600">
+                    {analysis.rewritten_query && analysis.rewritten_query.trim() !== '' ? 'Да' : 'Нет'}
                   </span>
                 </div>
               </div>

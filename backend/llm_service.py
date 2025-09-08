@@ -1,11 +1,13 @@
 import openai
 from typing import List, Dict, Any
-from models import OptimizationRecommendation, PriorityLevel, ResourceMetrics
+from models import OptimizationRecommendation, PriorityLevel, ResourceMetrics, LLMAnalysisResponse
 from config import settings
 import json
 import logging
 import hashlib
 from functools import lru_cache
+import asyncio
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -14,10 +16,11 @@ class LLMAnalyzer:
     """Сервис для анализа SQL запросов с помощью LLM"""
     
     def __init__(self):
-        self.client = openai.OpenAI(api_key=settings.openai_api_key)
+        self.client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
         self.model = settings.openai_model
         self._cache = {}
         self._cache_max_size = 100  # Максимальный размер кэша
+        self._session = None
     
     def _create_query_hash(self, query: str, execution_plan: Dict[str, Any]) -> str:
         """
@@ -66,7 +69,7 @@ class LLMAnalyzer:
         self._cache.clear()
         logger.info("Cache cleared")
     
-    def analyze_query_with_llm(self, query: str, execution_plan: Dict[str, Any]) -> Dict[str, Any]:
+    async def analyze_query_with_llm(self, query: str, execution_plan: Dict[str, Any]) -> Dict[str, Any]:
         """
         Анализирует SQL запрос с помощью LLM и возвращает структурированный результат
         """
@@ -87,33 +90,8 @@ class LLMAnalyzer:
             # Создаем промпт для анализа
             prompt = self._create_analysis_prompt(context)
             
-            # Вызываем LLM с обычным JSON response
-            json_prompt = prompt + """
-
-Отвечай ТОЛЬКО в формате JSON без дополнительного текста. Все тексты должны быть на русском языке:
-
-{
-  "rewritten_query": "оптимизированная_версия_запроса_или_null_если_не_требуется",
-  "resource_metrics": {
-    "cpu_usage": число_от_0_до_100,
-    "memory_usage": число_в_МБ,
-    "io_operations": целое_число,
-    "disk_reads": целое_число,
-    "disk_writes": целое_число
-  },
-  "recommendations": [
-    {
-      "type": "тип_рекомендации_на_русском",
-      "priority": "high|medium|low",
-      "title": "заголовок_на_русском",
-      "description": "подробное_описание_на_русском",
-      "potential_improvement": "потенциальное_улучшение_на_русском",
-      "implementation": "как_реализовать_на_русском",
-      "estimated_speedup": число_в_процентах
-    }
-  ],
-  "warnings": ["предупреждение_на_русском_1", "предупреждение_на_русском_2"]
-}
+            # Добавляем инструкции по структуре ответа
+            structured_prompt = prompt + """
 
 ВАЖНО: Поле "rewritten_query" должно содержать оптимизированную версию SQL запроса, если это необходимо для улучшения производительности. 
 Примеры случаев, когда нужно переписать запрос:
@@ -122,40 +100,36 @@ class LLMAnalyzer:
 - Неэффективные конструкции WHERE
 - Отсутствие LIMIT в запросах с большим результатом
 Если запрос уже оптимален или переписывание не требуется, укажи null.
+
+Все тексты должны быть на русском языке.
 """
 
-            response = self.client.chat.completions.create(
+            # Используем структурированный вывод с Pydantic
+            response = await self.client.beta.chat.completions.parse(
                 model=self.model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "Ты эксперт по оптимизации PostgreSQL. Анализируй SQL запросы и предоставляй детальные рекомендации по улучшению производительности на русском языке. Отвечай ТОЛЬКО в формате JSON без дополнительного текста."
+                        "content": "Ты эксперт по оптимизации PostgreSQL. Анализируй SQL запросы и предоставляй детальные рекомендации по улучшению производительности на русском языке."
                     },
                     {
                         "role": "user",
-                        "content": json_prompt
+                        "content": structured_prompt
                     }
                 ],
+                response_format=LLMAnalysisResponse,
                 temperature=0.1
             )
             
-            # Парсим ответ
-            content = response.choices[0].message.content
-            logger.info(f"LLM response content: {content}")
-            
-            # Очищаем ответ от возможных markdown блоков
-            if content.startswith("```json"):
-                content = content.replace("```json", "").replace("```", "").strip()
-            elif content.startswith("```"):
-                content = content.replace("```", "").strip()
-            
-            analysis_result = json.loads(content)
+            # Получаем структурированный ответ
+            analysis_result = response.choices[0].message.parsed
+            logger.info(f"LLM structured response received: {type(analysis_result)}")
             
             # Преобразуем в наши модели
             recommendations = []
-            for rec in analysis_result["recommendations"]:
+            for rec in analysis_result.recommendations:
                 # Обрабатываем estimated_speedup - может быть числом или строкой
-                estimated_speedup = rec.get("estimated_speedup")
+                estimated_speedup = rec.estimated_speedup
                 if estimated_speedup is not None:
                     try:
                         # Если это строка с диапазоном (например, "50-70"), берем среднее значение
@@ -169,17 +143,17 @@ class LLMAnalyzer:
                         estimated_speedup = None
                 
                 recommendations.append(OptimizationRecommendation(
-                    type=rec["type"],
-                    priority=PriorityLevel(rec["priority"]),
-                    title=rec["title"],
-                    description=rec["description"],
-                    potential_improvement=rec["potential_improvement"],
-                    implementation=rec["implementation"],
+                    type=rec.type,
+                    priority=PriorityLevel(rec.priority),
+                    title=rec.title,
+                    description=rec.description,
+                    potential_improvement=rec.potential_improvement,
+                    implementation=rec.implementation,
                     estimated_speedup=estimated_speedup
                 ))
             
             # Обрабатываем метрики ресурсов, заменяя null на 0
-            resource_metrics_data = analysis_result["resource_metrics"]
+            resource_metrics_data = analysis_result.resource_metrics.dict()
             for key in resource_metrics_data:
                 if resource_metrics_data[key] is None:
                     resource_metrics_data[key] = 0
@@ -187,10 +161,10 @@ class LLMAnalyzer:
             resource_metrics = ResourceMetrics(**resource_metrics_data)
             
             result = {
-                "rewritten_query": analysis_result.get("rewritten_query"),
+                "rewritten_query": analysis_result.rewritten_query,
                 "resource_metrics": resource_metrics,
                 "recommendations": recommendations,
-                "warnings": analysis_result["warnings"]
+                "warnings": analysis_result.warnings
             }
             
             # Сохраняем результат в кэш
@@ -263,10 +237,15 @@ SQL ЗАПРОС:
 {context['query']}
 """
         
+        # Определяем тип запроса для адаптации анализа
+        query_type = context['execution_plan'].get('Query Type', 'SELECT')
+        
         return f"""
 Проанализируй следующий SQL запрос и его план выполнения:
 
 {query_description}
+
+ТИП ЗАПРОСА: {query_type}
 
 ПЛАН ВЫПОЛНЕНИЯ (для основного запроса):
 - Общая стоимость: {context['total_cost']}
@@ -290,22 +269,24 @@ SQL ЗАПРОС:
    - Оцени потенциальное ускорение для каждой рекомендации
    - Предоставь конкретные шаги реализации
    {"- Учитывай взаимосвязь между запросами в цепочке" if is_chain else ""}
+   {"- Для DML запросов (INSERT/UPDATE/DELETE) обрати внимание на блокировки и производительность записи" if query_type in ['INSERT', 'UPDATE', 'DELETE'] else ""}
 
 3. ПРЕДУПРЕЖДЕНИЯ:
    - Выяви потенциально опасные операции
    - Отметь проблемы с производительностью
    - Укажи на возможные блокировки
    {"- Обрати внимание на дублирование операций в цепочке" if is_chain else ""}
+   {"- Для DML запросов предупреди о потенциальных блокировках таблиц" if query_type in ['INSERT', 'UPDATE', 'DELETE'] else ""}
 
 Будь конкретным и практичным в рекомендациях. Фокусируйся на реальных улучшениях производительности.
 """
     
-    def test_connection(self) -> bool:
+    async def test_connection(self) -> bool:
         """
         Проверяет доступность OpenAI API
         """
         try:
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": "Test"}],
                 max_tokens=1

@@ -70,3 +70,32 @@ class HealthCheck(BaseModel):
     timestamp: datetime
     database_connected: bool
     openai_available: bool
+
+
+# Модели для ответа LLM
+class LLMResourceMetrics(BaseModel):
+    """Метрики ресурсоемкости от LLM"""
+    cpu_usage: float = Field(..., description="Ожидаемое использование CPU (0-100)")
+    memory_usage: float = Field(..., description="Ожидаемое использование памяти в MB")
+    io_operations: int = Field(..., description="Количество I/O операций")
+    disk_reads: int = Field(..., description="Количество чтений с диска")
+    disk_writes: int = Field(..., description="Количество записей на диск")
+
+
+class LLMOptimizationRecommendation(BaseModel):
+    """Рекомендация по оптимизации от LLM"""
+    type: str = Field(..., description="Тип рекомендации на русском языке")
+    priority: str = Field(..., description="Приоритет: high, medium или low")
+    title: str = Field(..., description="Заголовок рекомендации на русском языке")
+    description: str = Field(..., description="Подробное описание на русском языке")
+    potential_improvement: str = Field(..., description="Потенциальное улучшение на русском языке")
+    implementation: str = Field(..., description="Как реализовать на русском языке")
+    estimated_speedup: Optional[float] = Field(None, description="Ожидаемое ускорение в процентах")
+
+
+class LLMAnalysisResponse(BaseModel):
+    """Ответ от LLM для анализа запроса"""
+    rewritten_query: Optional[str] = Field(None, description="Оптимизированная версия запроса или null")
+    resource_metrics: LLMResourceMetrics = Field(..., description="Метрики ресурсов")
+    recommendations: List[LLMOptimizationRecommendation] = Field(..., description="Список рекомендаций")
+    warnings: List[str] = Field(default_factory=list, description="Список предупреждений на русском языке")

@@ -6,9 +6,14 @@ class Settings(BaseSettings):
     # Database settings
     database_url: str = "postgresql://analyzer_user:analyzer_pass@localhost:5432/query_analyzer"
     
-    # OpenAI settings
+    # LLM settings
     openai_api_key: str
-    openai_model: str = "gpt-4-1106-preview"
+    openai_model: str = "gpt-4o"
+    
+    # Custom LLM settings (optional)
+    llm_url: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_api_key: Optional[str] = None
     
     # Application settings
     app_name: str = "PostgreSQL Query Analyzer"
