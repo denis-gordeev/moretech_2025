@@ -101,7 +101,7 @@ class ExampleGenerator:
                 stats_query = """
                 SELECT 
                     schemaname,
-                    tablename,
+                    relname as tablename,
                     n_tup_ins,
                     n_tup_upd,
                     n_tup_del,
@@ -109,8 +109,8 @@ class ExampleGenerator:
                     n_dead_tup
                 FROM pg_stat_user_tables 
                 WHERE schemaname = 'public'
-                AND tablename IN ('users', 'orders', 'order_items')
-                ORDER BY tablename
+                AND relname IN ('users', 'orders', 'order_items')
+                ORDER BY relname
                 """
                 
                 stats_rows = await conn.fetch(stats_query)

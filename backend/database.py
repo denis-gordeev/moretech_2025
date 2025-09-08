@@ -59,20 +59,43 @@ class PostgreSQLAnalyzer:
                     }
                 
                 result = await conn.fetchrow(explain_query)
+                logger.info(f"EXPLAIN result: {result}")
                 
                 if result and 'QUERY PLAN' in result:
-                    # EXPLAIN возвращает результат в формате [{'Plan': {...}}]
-                    plan_data = result['QUERY PLAN'][0]  # Первый элемент массива планов
-                    if isinstance(plan_data, dict) and 'Plan' in plan_data:
-                        plan = dict(plan_data['Plan'])
-                        plan['Query Type'] = query_type
-                        return plan
-                    elif isinstance(plan_data, dict):
-                        plan_data_copy = dict(plan_data)
-                        plan_data_copy['Query Type'] = query_type
-                        return plan_data_copy
+                    # EXPLAIN возвращает результат как строку JSON, нужно распарсить
+                    query_plan_json = result['QUERY PLAN']
+                    logger.info(f"Query plan JSON: {query_plan_json}")
+                    
+                    # Парсим JSON строку
+                    import json
+                    plan_array = json.loads(query_plan_json)
+                    logger.info(f"Parsed plan array: {plan_array}")
+                    
+                    if plan_array and len(plan_array) > 0:
+                        plan_data = plan_array[0]  # Первый элемент массива планов
+                        logger.info(f"Plan data: {plan_data}, type: {type(plan_data)}")
+                        
+                        if isinstance(plan_data, dict) and 'Plan' in plan_data:
+                            plan = dict(plan_data['Plan'])
+                            plan['Query Type'] = query_type
+                            return plan
+                        elif isinstance(plan_data, dict):
+                            plan_data_copy = dict(plan_data)
+                            plan_data_copy['Query Type'] = query_type
+                            return plan_data_copy
+                        else:
+                            # Если plan_data не является словарем, возвращаем базовую информацию
+                            logger.warning(f"Plan data is not a dict: {plan_data}")
+                            return {
+                                'Node Type': 'Unknown',
+                                'Total Cost': 0,
+                                'Plan Rows': 0,
+                                'Plan Width': 0,
+                                'Query Type': query_type,
+                                'Description': f'Query type: {query_type}'
+                            }
                     else:
-                        # Если plan_data не является словарем, возвращаем базовую информацию
+                        logger.warning("Empty plan array")
                         return {
                             'Node Type': 'Unknown',
                             'Total Cost': 0,

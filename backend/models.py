@@ -31,6 +31,14 @@ class ResourceMetrics(BaseModel):
     io_operations: int = Field(..., description="Количество I/O операций")
     disk_reads: int = Field(..., description="Количество чтений с диска")
     disk_writes: int = Field(..., description="Количество записей на диск")
+    # Дополнительные поля для расширенного анализа
+    disk_io: Optional[float] = Field(None, description="Общий объем дисковых операций в MB")
+    network_io: Optional[float] = Field(None, description="Объем сетевого трафика в KB")
+    execution_time: Optional[float] = Field(None, description="Ожидаемое время выполнения в мс")
+    rows_processed: Optional[int] = Field(None, description="Количество обработанных строк")
+    index_usage: Optional[float] = Field(None, description="Процент использования индексов")
+    cache_hit_ratio: Optional[float] = Field(None, description="Процент попаданий в кэш")
+    lock_contention: Optional[float] = Field(None, description="Уровень конкуренции за блокировки")
 
 
 class OptimizationRecommendation(BaseModel):
@@ -80,6 +88,14 @@ class LLMResourceMetrics(BaseModel):
     io_operations: int = Field(..., description="Количество I/O операций")
     disk_reads: int = Field(..., description="Количество чтений с диска")
     disk_writes: int = Field(..., description="Количество записей на диск")
+    # Дополнительные поля для расширенного анализа
+    disk_io: Optional[float] = Field(None, description="Общий объем дисковых операций в MB (сумма disk_reads + disk_writes)")
+    network_io: Optional[float] = Field(None, description="Объем сетевого трафика в KB (для распределенных запросов)")
+    execution_time: Optional[float] = Field(None, description="Ожидаемое время выполнения в мс (на основе плана выполнения)")
+    rows_processed: Optional[int] = Field(None, description="Количество обработанных строк (из плана выполнения)")
+    index_usage: Optional[float] = Field(None, description="Процент использования индексов (0-100, на основе анализа плана)")
+    cache_hit_ratio: Optional[float] = Field(None, description="Процент попаданий в кэш буферов (0-100, на основе статистики)")
+    lock_contention: Optional[float] = Field(None, description="Уровень конкуренции за блокировки (0-100, для DML операций)")
 
 
 class LLMOptimizationRecommendation(BaseModel):

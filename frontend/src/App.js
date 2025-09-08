@@ -157,7 +157,7 @@ function App() {
             />
 
             {/* Execution Plan */}
-            <ExecutionPlan executionPlan={analysis.execution_plan} />
+            <ExecutionPlan plan={analysis.execution_plan?.plan_json} />
 
             {/* Resource Metrics */}
             <ResourceMetrics resourceMetrics={analysis.resource_metrics} />

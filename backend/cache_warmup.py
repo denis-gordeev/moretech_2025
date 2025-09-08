@@ -114,6 +114,91 @@ class CacheWarmupService:
         logger.info(f"Cache warmup completed: {processed} processed, {errors} errors")
         return warmup_result
     
+    async def warmup_new_examples(self, max_queries: int = 5) -> Dict[str, Any]:
+        """
+        Кэширует только новые примеры (пропускает уже закэшированные)
+        """
+        logger.info("Starting cache warmup for new examples...")
+        
+        # Загружаем тестовые запросы
+        test_queries = await self.load_test_queries()
+        if not test_queries:
+            logger.warning("No test queries found for warmup")
+            return {"status": "no_queries", "processed": 0, "errors": 0}
+        
+        # Получаем статистику кэша, чтобы понять, какие запросы уже закэшированы
+        cache_stats = self.llm_analyzer.get_cache_stats()
+        current_cache_size = cache_stats.get('size', 0)
+        
+        # Если кэш пустой, кэшируем первые запросы
+        if current_cache_size == 0:
+            logger.info("Cache is empty, using regular warmup")
+            return await self.warmup_cache(max_queries)
+        
+        # Иначе кэшируем запросы, начиная с позиции после уже закэшированных
+        start_index = min(current_cache_size, len(test_queries))
+        queries_to_process = test_queries[start_index:start_index + max_queries]
+        
+        if not queries_to_process:
+            logger.info("No new queries to cache")
+            return {"status": "no_new_queries", "processed": 0, "errors": 0}
+        
+        processed = 0
+        errors = 0
+        results = []
+        
+        for i, query_data in enumerate(queries_to_process):
+            try:
+                query = query_data['query']
+                name = query_data['name']
+                
+                logger.info(f"Processing new query {i+1}/{len(queries_to_process)}: {name}")
+                
+                # Получаем план выполнения
+                plan_data = await self.db_analyzer.analyze_query_performance(query)
+                
+                # Анализируем с помощью LLM (это добавит результат в кэш)
+                llm_result = await self.llm_analyzer.analyze_query_with_llm(
+                    query, 
+                    plan_data['plan_json']
+                )
+                
+                results.append({
+                    "name": name,
+                    "query": query[:100] + "..." if len(query) > 100 else query,
+                    "status": "success",
+                    "has_rewritten_query": llm_result.get('rewritten_query') is not None,
+                    "recommendations_count": len(llm_result.get('recommendations', []))
+                })
+                
+                processed += 1
+                logger.info(f"Successfully cached new query: {name}")
+                
+            except Exception as e:
+                logger.error(f"Failed to process new query '{name}': {e}")
+                errors += 1
+                results.append({
+                    "name": name,
+                    "query": query_data['query'][:100] + "..." if len(query_data['query']) > 100 else query_data['query'],
+                    "status": "error",
+                    "error": str(e)
+                })
+        
+        # Получаем обновленную статистику кэша
+        updated_cache_stats = self.llm_analyzer.get_cache_stats()
+        
+        warmup_result = {
+            "status": "completed",
+            "processed": processed,
+            "errors": errors,
+            "total_queries": len(queries_to_process),
+            "cache_stats": updated_cache_stats,
+            "results": results
+        }
+        
+        logger.info(f"New examples cache warmup completed: {processed} processed, {errors} errors")
+        return warmup_result
+    
     async def test_cache_hit(self, query: str) -> Dict[str, Any]:
         """
         Тестирует попадание в кэш для конкретного запроса
