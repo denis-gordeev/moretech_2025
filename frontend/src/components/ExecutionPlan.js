@@ -1,10 +1,27 @@
 import React, { useState } from 'react';
-import { Database, Zap, Clock, BarChart3, ChevronDown, ChevronUp } from 'lucide-react';
+import { Database, Zap, Clock, BarChart3, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
 
 const ExecutionPlan = ({ plan }) => {
   const [showDetails, setShowDetails] = useState(false);
+  const [expandedNodes, setExpandedNodes] = useState(new Set());
   
   if (!plan) return null;
+
+  // Функция для переключения состояния развернутости узла
+  const toggleNode = (nodeId) => {
+    const newExpandedNodes = new Set(expandedNodes);
+    if (newExpandedNodes.has(nodeId)) {
+      newExpandedNodes.delete(nodeId);
+    } else {
+      newExpandedNodes.add(nodeId);
+    }
+    setExpandedNodes(newExpandedNodes);
+  };
+
+  // Функция для генерации уникального ID узла
+  const getNodeId = (node, depth, index) => {
+    return `${depth}-${index}-${node['Node Type'] || 'unknown'}`;
+  };
 
   // Словарь русскоязычных названий для полей
   const fieldNames = {
@@ -234,14 +251,54 @@ const ExecutionPlan = ({ plan }) => {
       });
   };
 
-  const renderPlanNode = (node, depth = 0) => {
+  // Компонент для отображения узла дерева
+  const TreeNode = ({ node, depth = 0, index = 0 }) => {
+    const nodeId = getNodeId(node, depth, index);
+    const isExpanded = expandedNodes.has(nodeId);
+    const hasChildren = node['Plans'] && node['Plans'].length > 0;
     const primaryMetrics = getPrimaryMetrics(node);
     const secondaryMetrics = getSecondaryMetrics(node);
     
     return (
-      <div key={depth} className="mb-4">
-        <div className="bg-gray-50 p-4 rounded-lg">
-          {/* Основные метрики в виде квадратиков */}
+      <div className="mb-2">
+        {/* Заголовок узла с кнопкой разворачивания */}
+        <div className="flex items-center mb-2">
+          {hasChildren && (
+            <button
+              onClick={() => toggleNode(nodeId)}
+              className="flex items-center justify-center w-6 h-6 mr-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
+            >
+              {isExpanded ? (
+                <ChevronDown className="w-4 h-4" />
+              ) : (
+                <ChevronRight className="w-4 h-4" />
+              )}
+            </button>
+          )}
+          {!hasChildren && <div className="w-6 mr-2" />}
+          
+          <div className="flex-1">
+            <div className="flex items-center">
+              <div className={`px-3 py-1 rounded-full text-sm font-medium ${getNodeTypeColor(node['Node Type'])}`}>
+                {node['Node Type'] || 'Unknown'}
+              </div>
+              {node['Relation Name'] && (
+                <span className="ml-2 text-sm text-gray-600">
+                  ({node['Relation Name']})
+                </span>
+              )}
+              {node['Index Name'] && (
+                <span className="ml-2 text-sm text-green-600">
+                  [индекс: {node['Index Name']}]
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Содержимое узла */}
+        <div className={`ml-8 ${hasChildren ? 'border-l-2 border-gray-200 pl-4' : ''}`}>
+          {/* Основные метрики */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
             {primaryMetrics.map((metric, index) => (
               <PlanMetricCard key={index} {...metric} />
@@ -270,7 +327,7 @@ const ExecutionPlan = ({ plan }) => {
             </div>
           )}
           
-          {/* Дополнительные метрики в виде квадратиков (показываются при разворачивании) */}
+          {/* Дополнительные метрики */}
           {showDetails && secondaryMetrics.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 mb-4">
               {secondaryMetrics.map((metric, index) => (
@@ -279,14 +336,19 @@ const ExecutionPlan = ({ plan }) => {
             </div>
           )}
 
-          {/* Рекурсивно отображаем вложенные планы */}
-          {node['Plans'] && node['Plans'].length > 0 && (
+          {/* Вложенные узлы */}
+          {hasChildren && isExpanded && (
             <div className="mt-4">
-              <h5 className="text-md font-medium text-gray-700 mb-2">Вложенные планы:</h5>
-              {node['Plans'].map((subPlan, index) => (
-                <div key={index}>
-                  {renderPlanNode(subPlan, depth + 1)}
-                </div>
+              <h6 className="text-sm font-medium text-gray-600 mb-3">
+                Вложенные операции ({node['Plans'].length}):
+              </h6>
+              {node['Plans'].map((subPlan, subIndex) => (
+                <TreeNode 
+                  key={subIndex} 
+                  node={subPlan} 
+                  depth={depth + 1} 
+                  index={subIndex} 
+                />
               ))}
             </div>
           )}
@@ -295,10 +357,53 @@ const ExecutionPlan = ({ plan }) => {
     );
   };
 
+  const renderPlanNode = (node, depth = 0) => {
+    return <TreeNode node={node} depth={depth} index={0} />;
+  };
+
+  // Функция для разворачивания всех узлов
+  const expandAll = () => {
+    const allNodeIds = new Set();
+    const collectNodeIds = (node, depth = 0, index = 0) => {
+      allNodeIds.add(getNodeId(node, depth, index));
+      if (node['Plans']) {
+        node['Plans'].forEach((subPlan, subIndex) => {
+          collectNodeIds(subPlan, depth + 1, subIndex);
+        });
+      }
+    };
+    collectNodeIds(plan);
+    setExpandedNodes(allNodeIds);
+  };
+
+  // Функция для сворачивания всех узлов
+  const collapseAll = () => {
+    setExpandedNodes(new Set());
+  };
+
   return (
     <div className="card">
-      <h2 className="text-xl font-semibold text-gray-900 mb-4">План выполнения запроса</h2>
-      <div className="space-y-2">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-semibold text-gray-900">План выполнения запроса</h2>
+        <div className="flex space-x-2">
+          <button
+            onClick={expandAll}
+            className="flex items-center px-3 py-1 text-sm font-medium text-blue-600 bg-blue-50 rounded hover:bg-blue-100 transition-colors"
+          >
+            <ChevronDown className="w-4 h-4 mr-1" />
+            Развернуть все
+          </button>
+          <button
+            onClick={collapseAll}
+            className="flex items-center px-3 py-1 text-sm font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+          >
+            <ChevronRight className="w-4 h-4 mr-1" />
+            Свернуть все
+          </button>
+        </div>
+      </div>
+      
+      <div className="bg-white border border-gray-200 rounded-lg p-4">
         {renderPlanNode(plan)}
       </div>
     </div>

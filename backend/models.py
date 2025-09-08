@@ -17,6 +17,7 @@ class QueryAnalysisRequest(BaseModel):
 
 class ExecutionPlan(BaseModel):
     """Модель плана выполнения запроса"""
+
     total_cost: float = Field(..., description="Общая стоимость запроса")
     execution_time: float = Field(..., description="Ожидаемое время выполнения в мс")
     rows: int = Field(..., description="Количество строк")
@@ -26,6 +27,7 @@ class ExecutionPlan(BaseModel):
 
 class ResourceMetrics(BaseModel):
     """Метрики ресурсоемкости"""
+
     cpu_usage: float = Field(..., description="Ожидаемое использование CPU")
     memory_usage: float = Field(..., description="Ожидаемое использование памяти в MB")
     io_operations: int = Field(..., description="Количество I/O операций")
@@ -43,6 +45,7 @@ class ResourceMetrics(BaseModel):
 
 class OptimizationRecommendation(BaseModel):
     """Рекомендация по оптимизации"""
+
     type: str = Field(..., description="Тип рекомендации (index, query_rewrite, config, etc.)")
     priority: PriorityLevel = Field(..., description="Приоритет рекомендации")
     title: str = Field(..., description="Заголовок рекомендации")
@@ -54,6 +57,7 @@ class OptimizationRecommendation(BaseModel):
 
 class QueryAnalysis(BaseModel):
     """Результат анализа запроса"""
+
     query: str = Field(..., description="Исходный запрос")
     rewritten_query: Optional[str] = Field(None, description="Оптимизированная версия запроса (если требуется)")
     execution_plan: ExecutionPlan = Field(..., description="План выполнения")
@@ -65,6 +69,7 @@ class QueryAnalysis(BaseModel):
 
 class DatabaseConfig(BaseModel):
     """Конфигурация базы данных"""
+
     host: str
     port: int = 5432
     database: str
@@ -74,6 +79,7 @@ class DatabaseConfig(BaseModel):
 
 class HealthCheck(BaseModel):
     """Статус здоровья сервиса"""
+
     status: str
     timestamp: datetime
     database_connected: bool
@@ -83,23 +89,35 @@ class HealthCheck(BaseModel):
 # Модели для ответа LLM
 class LLMResourceMetrics(BaseModel):
     """Метрики ресурсоемкости от LLM"""
+
     cpu_usage: float = Field(..., description="Ожидаемое использование CPU (0-100)")
     memory_usage: float = Field(..., description="Ожидаемое использование памяти в MB")
     io_operations: int = Field(..., description="Количество I/O операций")
     disk_reads: int = Field(..., description="Количество чтений с диска")
     disk_writes: int = Field(..., description="Количество записей на диск")
     # Дополнительные поля для расширенного анализа
-    disk_io: Optional[float] = Field(None, description="Общий объем дисковых операций в MB (сумма disk_reads + disk_writes)")
+    disk_io: Optional[float] = Field(
+        None, description="Общий объем дисковых операций в MB (сумма disk_reads + disk_writes)"
+    )
     network_io: Optional[float] = Field(None, description="Объем сетевого трафика в KB (для распределенных запросов)")
-    execution_time: Optional[float] = Field(None, description="Ожидаемое время выполнения в мс (на основе плана выполнения)")
+    execution_time: Optional[float] = Field(
+        None, description="Ожидаемое время выполнения в мс (на основе плана выполнения)"
+    )
     rows_processed: Optional[int] = Field(None, description="Количество обработанных строк (из плана выполнения)")
-    index_usage: Optional[float] = Field(None, description="Процент использования индексов (0-100, на основе анализа плана)")
-    cache_hit_ratio: Optional[float] = Field(None, description="Процент попаданий в кэш буферов (0-100, на основе статистики)")
-    lock_contention: Optional[float] = Field(None, description="Уровень конкуренции за блокировки (0-100, для DML операций)")
+    index_usage: Optional[float] = Field(
+        None, description="Процент использования индексов (0-100, на основе анализа плана)"
+    )
+    cache_hit_ratio: Optional[float] = Field(
+        None, description="Процент попаданий в кэш буферов (0-100, на основе статистики)"
+    )
+    lock_contention: Optional[float] = Field(
+        None, description="Уровень конкуренции за блокировки (0-100, для DML операций)"
+    )
 
 
 class LLMOptimizationRecommendation(BaseModel):
     """Рекомендация по оптимизации от LLM"""
+
     type: str = Field(..., description="Тип рекомендации на русском языке")
     priority: str = Field(..., description="Приоритет: high, medium или low")
     title: str = Field(..., description="Заголовок рекомендации на русском языке")
@@ -111,6 +129,7 @@ class LLMOptimizationRecommendation(BaseModel):
 
 class LLMAnalysisResponse(BaseModel):
     """Ответ от LLM для анализа запроса"""
+
     rewritten_query: Optional[str] = Field(None, description="Оптимизированная версия запроса или null")
     resource_metrics: LLMResourceMetrics = Field(..., description="Метрики ресурсов")
     recommendations: List[LLMOptimizationRecommendation] = Field(..., description="Список рекомендаций")
