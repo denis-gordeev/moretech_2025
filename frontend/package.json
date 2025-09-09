@@ -2,6 +2,8 @@
   "name": "postgresql-query-analyzer-frontend",
   "version": "1.0.0",
   "private": true,
+  "description": "PostgreSQL Query Analyzer Frontend - создано командой БОРЖОРА для MoreTech 2025",
+  "author": "Команда БОРЖОРА",
   "dependencies": {
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",

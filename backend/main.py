@@ -1,3 +1,11 @@
+"""
+PostgreSQL Query Analyzer Backend
+Создано командой БОРЖОРА для MoreTech 2025
+
+Основной модуль FastAPI приложения для анализа SQL-запросов PostgreSQL
+с использованием LLM и structured output.
+"""
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import logging

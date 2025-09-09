@@ -27,9 +27,9 @@ class LLMAnalyzer:
 
     def _create_query_hash(self, query: str, execution_plan: Dict[str, Any]) -> str:
         """
-        Создает хэш для запроса и плана выполнения для кэширования
+        Создает хэш для запроса, плана выполнения и модели для кэширования
         """
-        # Создаем строку для хэширования из запроса и ключевых параметров плана
+        # Создаем строку для хэширования из запроса, ключевых параметров плана и модели
         plan_summary = {
             "total_cost": execution_plan.get("Total Cost", 0),
             "execution_time": execution_plan.get("Actual Total Time", 0),
@@ -37,7 +37,8 @@ class LLMAnalyzer:
             "node_type": execution_plan.get("Node Type", ""),
         }
 
-        cache_string = f"{query}|{json.dumps(plan_summary, sort_keys=True)}"
+        # Включаем модель в хэш для разделения кэша по моделям
+        cache_string = f"{self.model}|{query}|{json.dumps(plan_summary, sort_keys=True)}"
         return hashlib.md5(cache_string.encode("utf-8")).hexdigest()
 
     def _add_to_cache(self, query_hash: str, result: Dict[str, Any]) -> None:

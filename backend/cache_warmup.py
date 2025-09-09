@@ -5,6 +5,7 @@ from typing import List, Dict, Any
 from pathlib import Path
 from database import PostgreSQLAnalyzer
 from llm_service import LLMAnalyzer
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +15,13 @@ class CacheWarmupService:
 
     def __init__(self):
         self.db_analyzer = PostgreSQLAnalyzer()
-        self.llm_analyzer = LLMAnalyzer()
+        # Используем только первую модель для warmup
+        first_model = settings.get_model_by_index(0)
+        if not first_model:
+            raise ValueError("No LLM model available for warmup")
+        self.llm_analyzer = LLMAnalyzer(selected_model=first_model)
+        logger.info(f"Cache warmup using model: {first_model.name} ({first_model.model})")
+        
         # Ищем файл test_queries.json в разных возможных местах
         possible_paths = [
             Path(__file__).parent.parent / "test_queries.json",  # ../test_queries.json
@@ -44,9 +51,9 @@ class CacheWarmupService:
 
     async def warmup_cache(self, max_queries: int = 5) -> Dict[str, Any]:
         """
-        Предварительно кэширует тестовые запросы
+        Предварительно кэширует тестовые запросы для первой модели
         """
-        logger.info("Starting cache warmup...")
+        logger.info(f"Starting cache warmup for model: {self.llm_analyzer.model}...")
 
         # Загружаем тестовые запросы
         test_queries = await self.load_test_queries()
@@ -113,14 +120,14 @@ class CacheWarmupService:
             "results": results,
         }
 
-        logger.info(f"Cache warmup completed: {processed} processed, {errors} errors")
+        logger.info(f"Cache warmup completed for model {self.llm_analyzer.model}: {processed} processed, {errors} errors")
         return warmup_result
 
     async def warmup_new_examples(self, max_queries: int = 5) -> Dict[str, Any]:
         """
         Кэширует только новые примеры (пропускает уже закэшированные)
         """
-        logger.info("Starting cache warmup for new examples...")
+        logger.info(f"Starting cache warmup for new examples using model: {self.llm_analyzer.model}...")
 
         # Загружаем тестовые запросы
         test_queries = await self.load_test_queries()
@@ -201,12 +208,12 @@ class CacheWarmupService:
             "results": results,
         }
 
-        logger.info(f"New examples cache warmup completed: {processed} processed, {errors} errors")
+        logger.info(f"New examples cache warmup completed for model {self.llm_analyzer.model}: {processed} processed, {errors} errors")
         return warmup_result
 
     async def test_cache_hit(self, query: str) -> Dict[str, Any]:
         """
-        Тестирует попадание в кэш для конкретного запроса
+        Тестирует попадание в кэш для конкретного запроса (использует первую модель)
         """
         try:
             # Получаем план выполнения
@@ -226,5 +233,5 @@ class CacheWarmupService:
             }
 
         except Exception as e:
-            logger.error(f"Failed to test cache hit: {e}")
+            logger.error(f"Failed to test cache hit for model {self.llm_analyzer.model}: {e}")
             return {"status": "error", "error": str(e)}

@@ -90,7 +90,7 @@ function App() {
                   PostgreSQL Query Analyzer
                 </h1>
                 <p className="text-sm text-gray-500">
-                  Умный анализ SQL-запросов с помощью LLM
+                  Умный анализ SQL-запросов с помощью LLM • Команда БОРЖОРА • 2025
                 </p>
               </div>
             </div>
@@ -239,7 +239,7 @@ function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div className="text-sm text-gray-500">
-              © 2024 PostgreSQL Query Analyzer. Создано для MoreTech.
+              © 2025 PostgreSQL Query Analyzer. Создано командой БОРЖОРА для MoreTech.
             </div>
             <div className="flex items-center space-x-4 text-sm text-gray-500">
               <span>Powered by LLM</span>
