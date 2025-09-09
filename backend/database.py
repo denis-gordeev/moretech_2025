@@ -132,24 +132,11 @@ class PostgreSQLAnalyzer:
 
             except Exception as e:
                 logger.error(f"Error explaining query: {e}")
-                # Для DML запросов пытаемся конвертировать в SELECT и повторить EXPLAIN
+                # Если это DML запрос, который уже должен был быть конвертирован, возвращаем базовую информацию
                 query_type = self._get_query_type(query)
                 if query_type in ["INSERT", "UPDATE", "DELETE"]:
-                    logger.info(f"Attempting to convert DML query to SELECT for analysis: {query_type}")
-                    try:
-                        # Конвертируем DML в SELECT
-                        select_query = self._convert_dml_to_select(query)
-                        
-                        if select_query != query:  # Если конвертация прошла успешно
-                            logger.info(f"Retrying EXPLAIN with converted SELECT query")
-                            # Повторяем EXPLAIN с конвертированным запросом
-                            return await self._explain_select_query(select_query, query_type, original_query=query)
-                        else:
-                            logger.warning(f"Failed to convert DML query, returning basic info: {e}")
-                            return self._create_dml_plan_info(query_type, query)
-                    except Exception as conversion_error:
-                        logger.warning(f"DML conversion failed, returning basic info: {conversion_error}")
-                        return self._create_dml_plan_info(query_type, query)
+                    logger.warning(f"DML query failed after conversion attempt, returning basic info: {e}")
+                    return self._create_dml_plan_info(query_type, query)
                 else:
                     raise Exception(f"Query explanation error: {e}")
 
@@ -222,22 +209,41 @@ class PostgreSQLAnalyzer:
         Конвертирует UPDATE запрос в SELECT для анализа плана
         UPDATE table SET col1=val1, col2=val2 WHERE condition
         -> SELECT * FROM table WHERE condition
+        
+        UPDATE table SET col1=val1 FROM other_table WHERE condition
+        -> SELECT * FROM table, other_table WHERE condition
         """
         import re
         
-        # Извлекаем имя таблицы (может быть с алиасом)
+        # Извлекаем имя основной таблицы (может быть с алиасом)
         table_match = re.search(r'UPDATE\s+(\w+)(?:\s+\w+)?', query, re.IGNORECASE)
         if not table_match:
             return query
             
-        table_name = table_match.group(1)
+        main_table = table_match.group(1)
         
-        # Извлекаем WHERE условие (более сложный regex для обработки подзапросов)
+        # Ищем FROM клаузулу на уровне UPDATE (не внутри подзапросов)
+        # Для этого ищем FROM после SET и перед WHERE
+        set_match = re.search(r'SET\s+(?:(?!WHERE).)+', query, re.IGNORECASE | re.DOTALL)
+        if set_match:
+            set_part = set_match.group(0)
+            # Ищем FROM в SET части
+            from_match = re.search(r'FROM\s+(\w+)(?:\s+\w+)?', set_part, re.IGNORECASE)
+        else:
+            from_match = None
+        
+        # Извлекаем WHERE условие
         where_match = re.search(r'WHERE\s+(.+?)(?:\s+ORDER\s+BY|\s+LIMIT|$)', query, re.IGNORECASE | re.DOTALL)
         where_clause = where_match.group(1).strip() if where_match else "1=1"
         
         # Создаем SELECT запрос
-        select_query = f"SELECT * FROM {table_name} WHERE {where_clause}"
+        if from_match:
+            # UPDATE с FROM клаузулой
+            from_table = from_match.group(1)
+            select_query = f"SELECT * FROM {main_table}, {from_table} WHERE {where_clause}"
+        else:
+            # Простой UPDATE (включая с подзапросами)
+            select_query = f"SELECT * FROM {main_table} WHERE {where_clause}"
         
         logger.info(f"Converted UPDATE to SELECT: {select_query}")
         return select_query

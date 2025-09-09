@@ -4,7 +4,7 @@
 import ipaddress
 import logging
 from urllib.parse import urlparse
-from typing import List, Set
+from typing import Set
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +144,10 @@ def get_connection_limits() -> dict:
 def is_safe_query(query: str) -> tuple:
     """
     Базовая проверка безопасности SQL запроса
+    
+    ВНИМАНИЕ: Эта проверка отключена по умолчанию в настройках,
+    так как для анализа мы переписываем UPDATE/DELETE запросы в SELECT.
+    Включите enable_sql_security_check в config.py для активации.
 
     Args:
         query: SQL запрос

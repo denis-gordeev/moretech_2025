@@ -297,12 +297,13 @@ async def analyze_query(request: QueryAnalysisRequest):
                 detail=f"Query too long. Maximum length is {settings.max_query_length} characters"
             )
 
-        # Проверка безопасности SQL запроса
-        query_safe, query_warning = is_safe_query(request.query)
-        if not query_safe:
-            raise HTTPException(
-                status_code=400, detail=f"Security check failed: {query_warning}"
-            )
+        # Проверка безопасности SQL запроса (опционально)
+        if settings.enable_sql_security_check:
+            query_safe, query_warning = is_safe_query(request.query)
+            if not query_safe:
+                raise HTTPException(
+                    status_code=400, detail=f"Security check failed: {query_warning}"
+                )
 
         # Используем переданный URL БД или дефолтный
         analyzer = db_analyzer
@@ -355,17 +356,34 @@ async def analyze_query(request: QueryAnalysisRequest):
             plan_json=plan_data["plan_json"],
         )
 
-        # Анализируем с помощью LLM (передаем всю цепочку для контекста)
+        # Анализируем с помощью LLM (передаем только оригинальный запрос)
         logger.info("Running LLM analysis...")
         global table_statistics
+        
+        # LLM всегда получает оригинальный запрос для правильного контекста
+        query_for_llm = all_queries_text
+        if "Converted Query" in plan_data["plan_json"]:
+            original_query = plan_data["plan_json"].get("Converted From", all_queries_text)
+            query_for_llm = original_query
+            logger.info(f"LLM will analyze original query: {original_query[:100]}...")
+        else:
+            logger.info(f"LLM will analyze query: {query_for_llm[:100]}...")
+        
         llm_result = await llm_analyzer.analyze_query_with_llm(
-            all_queries_text, plan_data["plan_json"], table_statistics
+            query_for_llm, plan_data["plan_json"], table_statistics
         )
 
+        # Проверяем, нужно ли показывать rewritten_query
+        rewritten_query = llm_result.get("rewritten_query")
+        if rewritten_query and rewritten_query.strip() == request.query.strip():
+            # Если переписанный запрос совпадает с оригинальным, не показываем его
+            rewritten_query = None
+            logger.info("Rewritten query is identical to original, hiding from frontend")
+        
         # Создаем результат анализа
         analysis = QueryAnalysis(
             query=request.query,
-            rewritten_query=llm_result.get("rewritten_query"),
+            rewritten_query=rewritten_query,
             execution_plan=execution_plan,
             resource_metrics=llm_result["resource_metrics"],
             recommendations=llm_result["recommendations"],

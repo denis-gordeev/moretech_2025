@@ -48,6 +48,7 @@ class Settings(BaseSettings):
 
     # Analysis settings
     max_query_length: int = 10000
+    enable_sql_security_check: bool = False  # Отключено по умолчанию для анализа UPDATE/DELETE
     analysis_timeout: int = 30
 
     class Config:
