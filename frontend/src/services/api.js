@@ -36,8 +36,12 @@ export const queryAnalyzerAPI = {
   healthCheck: () => api.get('/health'),
   
   // Analyze query
-  analyzeQuery: (query, databaseUrl = null) => 
-    api.post('/analyze', { query, database_url: databaseUrl }),
+  analyzeQuery: (query, databaseProfileId = null, databaseUrl = null) => 
+    api.post('/analyze', { 
+      query, 
+      database_profile_id: databaseProfileId,
+      database_url: databaseUrl 
+    }),
   
   // Get database info
   getDatabaseInfo: () => api.get('/database/info'),
@@ -47,6 +51,12 @@ export const queryAnalyzerAPI = {
   
   // Get example queries
   getExampleQueries: () => api.get('/examples'),
+  
+  // LLM Models
+  getAvailableModels: () => api.get('/models'),
+  switchModel: (modelName) => api.post('/models/switch', null, {
+    params: { model_name: modelName }
+  }),
 };
 
 export default api;

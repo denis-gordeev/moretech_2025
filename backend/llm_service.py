@@ -1,7 +1,7 @@
 import openai
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from models import OptimizationRecommendation, PriorityLevel, ResourceMetrics, LLMAnalysisResponse
-from config import settings
+from config import settings, LLMModel
 import json
 import logging
 import hashlib
@@ -12,10 +12,16 @@ logger = logging.getLogger(__name__)
 class LLMAnalyzer:
     """Сервис для анализа SQL запросов с помощью LLM"""
 
-    def __init__(self):
-        self.client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
-        self.model = settings.openai_model
-        self._cache = {}
+    def __init__(self, selected_model: Optional[LLMModel] = None):
+        self.selected_model = selected_model or settings.get_model_by_index(0)
+        if not self.selected_model:
+            raise ValueError("No LLM model available")
+        self.client = openai.AsyncOpenAI(
+            api_key=self.selected_model.api_key,
+            base_url=self.selected_model.url
+        )
+        self.model = self.selected_model.model
+        self._cache: Dict[str, Any] = {}
         self._cache_max_size = 100  # Максимальный размер кэша
         self._session = None
 
@@ -66,8 +72,20 @@ class LLMAnalyzer:
         self._cache.clear()
         logger.info("Cache cleared")
 
+    def switch_model(self, model: LLMModel) -> None:
+        """
+        Переключает на другую модель
+        """
+        self.selected_model = model
+        self.client = openai.AsyncOpenAI(
+            api_key=model.api_key,
+            base_url=model.url
+        )
+        self.model = model.model
+        logger.info(f"Switched to model: {model.name} ({model.model})")
+
     async def analyze_query_with_llm(
-        self, query: str, execution_plan: Dict[str, Any], table_statistics: Dict[str, Any] = None
+        self, query: str, execution_plan: Dict[str, Any], table_statistics: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Анализирует SQL запрос с помощью LLM и возвращает структурированный результат
@@ -221,7 +239,7 @@ class LLMAnalyzer:
         extract_nodes_recursive(plan)
         return nodes
 
-    def _create_analysis_prompt(self, context: Dict[str, Any], table_statistics: Dict[str, Any] = None) -> str:
+    def _create_analysis_prompt(self, context: Dict[str, Any], table_statistics: Optional[Dict[str, Any]] = None) -> str:
         """
         Создает промпт для анализа запроса
         """

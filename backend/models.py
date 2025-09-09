@@ -13,6 +13,7 @@ class PriorityLevel(str, Enum):
 class QueryAnalysisRequest(BaseModel):
     query: str = Field(..., description="SQL запрос для анализа")
     database_url: Optional[str] = Field(None, description="URL базы данных (опционально)")
+    database_profile_id: Optional[str] = Field(None, description="ID профиля базы данных (опционально)")
 
 
 class ExecutionPlan(BaseModel):

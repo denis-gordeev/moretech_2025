@@ -7,6 +7,8 @@ import Recommendations from './components/Recommendations';
 import Warnings from './components/Warnings';
 import HealthStatus from './components/HealthStatus';
 import RewrittenQuery from './components/RewrittenQuery';
+import ModelSelector from './components/ModelSelector';
+import DatabaseProfiles from './components/DatabaseProfiles';
 import { queryAnalyzerAPI } from './services/api';
 
 function App() {
@@ -16,6 +18,8 @@ function App() {
   const [error, setError] = useState(null);
   const [examples, setExamples] = useState([]);
   const [activeTab, setActiveTab] = useState('query');
+  const [currentModel, setCurrentModel] = useState(null);
+  const [selectedDatabase, setSelectedDatabase] = useState(null);
 
   // Загружаем примеры запросов при инициализации
   useEffect(() => {
@@ -41,7 +45,7 @@ function App() {
     setAnalysis(null);
 
     try {
-      const response = await queryAnalyzerAPI.analyzeQuery(query);
+      const response = await queryAnalyzerAPI.analyzeQuery(query, selectedDatabase?.id);
       setAnalysis(response.data);
       setActiveTab('results');
     } catch (error) {
@@ -57,6 +61,13 @@ function App() {
 
   const handleQueryChange = (newQuery) => {
     setQuery(newQuery);
+    setError(null);
+  };
+
+  const handleModelChange = (modelName) => {
+    setCurrentModel(modelName);
+    // Очищаем предыдущий анализ при смене модели
+    setAnalysis(null);
     setError(null);
   };
 
@@ -84,6 +95,7 @@ function App() {
               </div>
             </div>
             <div className="flex items-center space-x-4">
+              <ModelSelector onModelChange={handleModelChange} />
               <div className="text-sm text-gray-500">
                 v1.0.0
               </div>
@@ -137,6 +149,11 @@ function App() {
         {/* Query Tab */}
         {activeTab === 'query' && (
           <div className="space-y-6">
+            <DatabaseProfiles 
+              onProfileSelect={setSelectedDatabase}
+              selectedProfile={selectedDatabase}
+            />
+            
             <QueryEditor
               query={query}
               onQueryChange={handleQueryChange}
@@ -225,7 +242,7 @@ function App() {
               © 2024 PostgreSQL Query Analyzer. Создано для MoreTech.
             </div>
             <div className="flex items-center space-x-4 text-sm text-gray-500">
-              <span>Powered by OpenAI GPT-4</span>
+              <span>Powered by LLM</span>
               <span>•</span>
               <span>PostgreSQL 15+</span>
             </div>

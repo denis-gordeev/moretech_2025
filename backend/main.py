@@ -13,6 +13,8 @@ from cache_warmup import CacheWarmupService
 from example_generator import ExampleGenerator
 from table_stats_service import TableStatsService
 from config import settings
+from security import validate_database_url, sanitize_db_url_for_logging, is_safe_query
+from database_profiles import profile_manager, DatabaseProfile
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -20,13 +22,15 @@ logger = logging.getLogger(__name__)
 
 # Создание FastAPI приложения
 app = FastAPI(
-    title=settings.app_name, description="Умный инструмент для анализа SQL-запросов PostgreSQL", version="1.0.0"
+    title=settings.app_name,
+    description="Умный инструмент для анализа SQL-запросов PostgreSQL",
+    version="1.0.0"
 )
 
 # Настройка CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=settings.cors_origins.split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -155,13 +159,68 @@ async def health_check():
         status = "healthy" if db_connected and openai_available else "unhealthy"
 
         return HealthCheck(
-            status=status, timestamp=datetime.now(), database_connected=db_connected, openai_available=openai_available
+            status=status,
+            timestamp=datetime.now(),
+            database_connected=db_connected,
+            openai_available=openai_available
         )
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return HealthCheck(
-            status="unhealthy", timestamp=datetime.now(), database_connected=False, openai_available=False
+            status="unhealthy",
+            timestamp=datetime.now(),
+            database_connected=False,
+            openai_available=False
         )
+
+
+@app.get("/models")
+async def get_available_models():
+    """Получить список доступных LLM моделей"""
+    try:
+        models = settings.get_available_models()
+        return {
+            "models": [
+                {
+                    "name": model.name,
+                    "model": model.model,
+                    "url": model.url,
+                    "is_current": model.name == llm_analyzer.selected_model.name
+                }
+                for model in models
+            ],
+            "current_model": llm_analyzer.selected_model.name
+        }
+    except Exception as e:
+        logger.error(f"Failed to get models: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/models/switch")
+async def switch_model(model_name: str):
+    """Переключить на другую LLM модель"""
+    try:
+        model = settings.get_model_by_name(model_name)
+        if not model:
+            raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found")
+
+        llm_analyzer.switch_model(model)
+        logger.info(f"Switched to model: {model.name}")
+
+        return {
+            "message": f"Successfully switched to {model.name}",
+            "current_model": model.name,
+            "model_info": {
+                "name": model.name,
+                "model": model.model,
+                "url": model.url
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to switch model: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/analyze", response_model=QueryAnalysis)
@@ -176,13 +235,42 @@ async def analyze_query(request: QueryAnalysisRequest):
 
         if len(request.query) > settings.max_query_length:
             raise HTTPException(
-                status_code=400, detail=f"Query too long. Maximum length is {settings.max_query_length} characters"
+                status_code=400,
+                detail=f"Query too long. Maximum length is {settings.max_query_length} characters"
+            )
+
+        # Проверка безопасности SQL запроса
+        query_safe, query_warning = is_safe_query(request.query)
+        if not query_safe:
+            raise HTTPException(
+                status_code=400, detail=f"Security check failed: {query_warning}"
             )
 
         # Используем переданный URL БД или дефолтный
         analyzer = db_analyzer
         if request.database_url:
+            # Валидация пользовательского URL БД
+            url_valid, url_error = validate_database_url(request.database_url)
+            if not url_valid:
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid database URL: {url_error}"
+                )
+
+            # Безопасное логирование
+            safe_url = sanitize_db_url_for_logging(request.database_url)
+            logger.info(f"Using custom database: {safe_url}")
             analyzer = PostgreSQLAnalyzer(request.database_url)
+        elif hasattr(request, 'database_profile_id') and request.database_profile_id:
+            # Использование профиля базы данных
+            connection = profile_manager.get_connection(request.database_profile_id)
+            if not connection:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Database profile not found or connection expired"
+                )
+            
+            profile_manager.update_last_used(request.database_profile_id)
+            analyzer = PostgreSQLAnalyzer(connection.get_connection_url())
 
         # Проверяем, является ли запрос цепочкой (содержит точку с запятой)
         queries = [q.strip() for q in request.query.split(";") if q.strip()]
@@ -251,9 +339,23 @@ async def get_database_info():
 async def test_database_connection(config: DatabaseConfig):
     """Тестирует подключение к указанной базе данных"""
     try:
-        database_url = f"postgresql://{config.username}:{config.password}@{config.host}:{config.port}/{config.database}"
-        test_analyzer = PostgreSQLAnalyzer(database_url)
+        database_url = (
+            f"postgresql://{config.username}:{config.password}@"
+            f"{config.host}:{config.port}/{config.database}"
+        )
 
+        # Валидация URL перед подключением
+        url_valid, url_error = validate_database_url(database_url)
+        if not url_valid:
+            return {
+                "status": "error",
+                "message": f"Invalid connection parameters: {url_error}"
+            }
+
+        # Безопасное логирование
+        safe_url = sanitize_db_url_for_logging(database_url)
+        logger.info(f"Testing database connection: {safe_url}")
+        test_analyzer = PostgreSQLAnalyzer(database_url)
         is_connected = await test_analyzer.test_connection()
 
         if is_connected:
@@ -494,6 +596,113 @@ async def test_cache_hit(request: QueryAnalysisRequest):
     except Exception as e:
         logger.error(f"Cache test failed: {e}")
         raise HTTPException(status_code=500, detail=f"Cache test failed: {str(e)}")
+
+
+# === DATABASE PROFILES API ===
+
+@app.post("/database/profiles")
+async def create_database_profile(
+    name: str,
+    host: str,
+    port: int,
+    database: str,
+    username: str,
+    password: str
+):
+    """Create a new database profile"""
+    try:
+        success, result = await profile_manager.create_profile(
+            name=name, host=host, port=port, 
+            database=database, username=username, password=password
+        )
+        
+        if success:
+            profile = profile_manager.get_profile(result)
+            return {
+                "status": "success",
+                "profile_id": result,
+                "profile": profile.dict() if profile else None,
+                "message": "Database profile created successfully"
+            }
+        else:
+            return {"status": "error", "message": result}
+            
+    except Exception as e:
+        logger.error(f"Failed to create database profile: {e}")
+        raise HTTPException(status_code=500, detail=f"Profile creation failed: {str(e)}")
+
+
+@app.get("/database/profiles")
+async def list_database_profiles():
+    """List all database profiles"""
+    try:
+        profiles = profile_manager.list_profiles()
+        return {
+            "status": "success",
+            "profiles": [profile.dict() for profile in profiles],
+            "count": len(profiles)
+        }
+    except Exception as e:
+        logger.error(f"Failed to list profiles: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list profiles: {str(e)}")
+
+
+@app.post("/database/profiles/{profile_id}/connect")
+async def connect_to_profile(profile_id: str, password: str):
+    """Connect to a database profile"""
+    try:
+        success, message = await profile_manager.refresh_connection(profile_id, password)
+        
+        if success:
+            return {"status": "success", "message": message}
+        else:
+            return {"status": "error", "message": message}
+            
+    except Exception as e:
+        logger.error(f"Failed to connect to profile {profile_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Connection failed: {str(e)}")
+
+
+@app.delete("/database/profiles/{profile_id}")
+async def delete_database_profile(profile_id: str):
+    """Delete a database profile"""
+    try:
+        success = profile_manager.delete_profile(profile_id)
+        
+        if success:
+            return {"status": "success", "message": "Profile deleted successfully"}
+        else:
+            return {"status": "error", "message": "Profile not found"}
+            
+    except Exception as e:
+        logger.error(f"Failed to delete profile {profile_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Deletion failed: {str(e)}")
+
+
+@app.get("/database/profiles/{profile_id}/info")
+async def get_profile_database_info(profile_id: str):
+    """Get database info for a specific profile"""
+    try:
+        connection = profile_manager.get_connection(profile_id)
+        if not connection:
+            raise HTTPException(status_code=404, detail="Profile not found or not connected")
+        
+        analyzer = PostgreSQLAnalyzer(connection.get_connection_url())
+        info = await analyzer.get_database_info()
+        
+        profile_manager.update_last_used(profile_id)
+        
+        return {
+            "status": "success",
+            "profile_id": profile_id,
+            "database_info": info
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get database info for profile {profile_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get database info: {str(e)}")
 
 
 if __name__ == "__main__":
