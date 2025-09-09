@@ -120,6 +120,31 @@ const DatabaseProfiles = ({ onProfileSelect, selectedProfile }) => {
     setSuccess(`Selected database: ${profile.name}`);
   };
 
+  const refreshDefaultProfile = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      const response = await fetch('http://localhost:8000/database/profiles/default', {
+        method: 'POST'
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        setSuccess('Default database profile refreshed successfully!');
+        await loadProfiles();
+      } else {
+        setError(data.message || 'Failed to refresh default profile');
+      }
+    } catch (error) {
+      console.error('Failed to refresh default profile:', error);
+      setError('Failed to refresh default profile');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
       <div className="flex items-center justify-between mb-4">
@@ -128,13 +153,25 @@ const DatabaseProfiles = ({ onProfileSelect, selectedProfile }) => {
           <h3 className="text-lg font-semibold text-gray-900">Database Profiles</h3>
         </div>
         
-        <button
-          onClick={() => setShowCreateForm(!showCreateForm)}
-          className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add Database</span>
-        </button>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={refreshDefaultProfile}
+            disabled={isLoading}
+            className="flex items-center space-x-1 px-3 py-1 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50"
+            title="Refresh default database profile"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>Refresh Default</span>
+          </button>
+          
+          <button
+            onClick={() => setShowCreateForm(!showCreateForm)}
+            className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Database</span>
+          </button>
+        </div>
       </div>
 
       {/* Error/Success Messages */}
@@ -290,20 +327,28 @@ const DatabaseProfiles = ({ onProfileSelect, selectedProfile }) => {
                 </div>
                 
                 <div className="flex items-center space-x-2">
+                  {profile.name === "Default Database" && (
+                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                      Default
+                    </span>
+                  )}
+                  
                   {profile.connection_test_passed && (
                     <CheckCircle className="w-4 h-4 text-green-500" title="Connection tested" />
                   )}
                   
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteProfile(profile.id);
-                    }}
-                    className="p-1 text-gray-400 hover:text-red-600 transition-colors"
-                    title="Delete profile"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {profile.name !== "Default Database" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteProfile(profile.id);
+                      }}
+                      className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                      title="Delete profile"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

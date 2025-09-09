@@ -49,6 +49,53 @@ table_stats_service = TableStatsService()
 table_statistics = {}
 
 
+async def create_default_database_profile():
+    """Создаёт профиль базы данных по умолчанию на основе настроек приложения"""
+    try:
+        # Парсим URL основной базы данных
+        from urllib.parse import urlparse
+        parsed_url = urlparse(settings.database_url)
+        
+        # Извлекаем компоненты подключения
+        host = parsed_url.hostname or "localhost"
+        port = parsed_url.port or 5432
+        database = parsed_url.path.lstrip('/') or "query_analyzer"
+        username = parsed_url.username or "analyzer_user"
+        password = parsed_url.password or "analyzer_pass"
+        
+        # Проверяем, есть ли уже профиль по умолчанию
+        existing_profiles = profile_manager.list_profiles()
+        default_profile_exists = any(
+            profile.name == "Default Database" and 
+            profile.host == host and 
+            profile.port == port and 
+            profile.database == database and 
+            profile.username == username
+            for profile in existing_profiles
+        )
+        
+        if not default_profile_exists:
+            # Создаём профиль по умолчанию
+            success, result = await profile_manager.create_profile(
+                name="Default Database",
+                host=host,
+                port=port,
+                database=database,
+                username=username,
+                password=password
+            )
+            
+            if success:
+                logger.info(f"Created default database profile: {result}")
+            else:
+                logger.warning(f"Failed to create default database profile: {result}")
+        else:
+            logger.info("Default database profile already exists")
+            
+    except Exception as e:
+        logger.error(f"Error creating default database profile: {e}")
+
+
 @app.on_event("startup")
 async def startup_event():
     """Событие запуска приложения - предварительное кэширование"""
@@ -60,6 +107,9 @@ async def startup_event():
         openai_available = await llm_analyzer.test_connection()
 
         if db_connected and openai_available:
+            # Создаём профиль по умолчанию для основной базы данных
+            await create_default_database_profile()
+            
             # Запускаем кэширование и генерацию примеров в фоне
             asyncio.create_task(startup_cache_warmup())
             asyncio.create_task(startup_example_generation())
@@ -703,6 +753,36 @@ async def get_profile_database_info(profile_id: str):
     except Exception as e:
         logger.error(f"Failed to get database info for profile {profile_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get database info: {str(e)}")
+
+
+@app.post("/database/profiles/default")
+async def create_or_refresh_default_profile():
+    """Create or refresh the default database profile"""
+    try:
+        await create_default_database_profile()
+        
+        # Найдём созданный профиль по умолчанию
+        profiles = profile_manager.list_profiles()
+        default_profile = next(
+            (p for p in profiles if p.name == "Default Database"), 
+            None
+        )
+        
+        if default_profile:
+            return {
+                "status": "success",
+                "message": "Default database profile created/refreshed successfully",
+                "profile": default_profile.dict()
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "Failed to create default database profile"
+            }
+            
+    except Exception as e:
+        logger.error(f"Failed to create/refresh default profile: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create default profile: {str(e)}")
 
 
 if __name__ == "__main__":
