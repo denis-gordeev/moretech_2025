@@ -74,6 +74,66 @@
       "name": "Cross join instead of proper JOIN",
       "query": "SELECT u.name, o.total_amount FROM users u CROSS JOIN orders o WHERE u.id = o.user_id",
       "description": "CROSS JOIN вместо обычного JOIN"
+    },
+    {
+      "name": "Simple UPDATE",
+      "query": "UPDATE users SET last_login = NOW() WHERE email = 'john@example.com'",
+      "description": "Простое обновление записи пользователя"
+    },
+    {
+      "name": "UPDATE with JOIN",
+      "query": "UPDATE orders SET status = 'completed' FROM users u WHERE orders.user_id = u.id AND u.email = 'john@example.com'",
+      "description": "Обновление с использованием JOIN"
+    },
+    {
+      "name": "UPDATE with subquery",
+      "query": "UPDATE users SET is_active = false WHERE id IN (SELECT user_id FROM orders WHERE total_amount > 1000)",
+      "description": "Обновление с подзапросом"
+    },
+    {
+      "name": "Bulk UPDATE",
+      "query": "UPDATE orders SET status = 'archived' WHERE created_at < '2023-01-01'",
+      "description": "Массовое обновление старых заказов"
+    },
+    {
+      "name": "UPDATE with calculation",
+      "query": "UPDATE order_items SET total_price = quantity * unit_price WHERE total_price IS NULL",
+      "description": "Обновление с вычислениями"
+    },
+    {
+      "name": "Simple DELETE",
+      "query": "DELETE FROM users WHERE email = 'old@example.com'",
+      "description": "Простое удаление записи"
+    },
+    {
+      "name": "DELETE with JOIN",
+      "query": "DELETE FROM orders USING users u WHERE orders.user_id = u.id AND u.email = 'john@example.com'",
+      "description": "Удаление с использованием JOIN"
+    },
+    {
+      "name": "DELETE with subquery",
+      "query": "DELETE FROM users WHERE id IN (SELECT user_id FROM orders WHERE total_amount < 10)",
+      "description": "Удаление с подзапросом"
+    },
+    {
+      "name": "Bulk DELETE",
+      "query": "DELETE FROM orders WHERE created_at < '2022-01-01'",
+      "description": "Массовое удаление старых заказов"
+    },
+    {
+      "name": "DELETE with LIMIT",
+      "query": "DELETE FROM users WHERE is_active = false LIMIT 100",
+      "description": "Удаление с ограничением количества"
+    },
+    {
+      "name": "Inefficient UPDATE (no index)",
+      "query": "UPDATE users SET last_login = NOW() WHERE name LIKE '%John%'",
+      "description": "Неэффективное обновление без индекса"
+    },
+    {
+      "name": "Inefficient DELETE (no index)",
+      "query": "DELETE FROM orders WHERE status LIKE '%old%'",
+      "description": "Неэффективное удаление без индекса"
     }
   ]
 }
