@@ -1,8 +1,10 @@
 import json
 import logging
-from typing import List, Dict, Any
 from pathlib import Path
+from typing import Any, Dict, List
+
 from pydantic import BaseModel, Field
+
 from database import PostgreSQLAnalyzer
 from llm_service import LLMAnalyzer
 
@@ -23,17 +25,24 @@ class ExampleGenerator:
         Очищает JSON от markdown код блоков
         """
         import re
-        
-        # Удаляем markdown код блоки
-        content = re.sub(r'```json\s*', '', content)
-        content = re.sub(r'```\s*$', '', content)
+
+        if not content:
+            return content
+
+        # Более агрессивная очистка markdown код блоков
+        content = re.sub(r"```json\s*\n?", "", content, flags=re.IGNORECASE)
+        content = re.sub(r"```\s*\n?$", "", content, flags=re.MULTILINE)
+        content = re.sub(r"^```\s*\n?", "", content, flags=re.MULTILINE)
         content = content.strip()
-        
-        # Ищем JSON массив или объект
-        json_match = re.search(r'(\[.*\]|\{.*\})', content, re.DOTALL)
+
+        # Ищем JSON массив или объект с более гибким паттерном
+        json_match = re.search(r"(\[[\s\S]*\]|\{[\s\S]*\})", content)
         if json_match:
-            return json_match.group(1)
-        
+            json_content = json_match.group(1)
+            # Дополнительная очистка возможных остатков markdown
+            json_content = re.sub(r"```.*?$", "", json_content, flags=re.MULTILINE)
+            return json_content.strip()
+
         return content
 
     async def generate_examples_with_llm(self) -> List[Dict[str, Any]]:
@@ -57,7 +66,9 @@ class ExampleGenerator:
             logger.error(f"Failed to generate examples with LLM: {e}")
             return []
 
-    async def generate_examples_with_llm_for_database(self, analyzer: PostgreSQLAnalyzer, database_profile_id: str = None) -> List[Dict[str, Any]]:
+    async def generate_examples_with_llm_for_database(
+        self, analyzer: PostgreSQLAnalyzer, database_profile_id: str = None
+    ) -> List[Dict[str, Any]]:
         """
         Генерирует примеры SQL запросов с помощью LLM для конкретной базы данных,
         адаптируя существующие примеры под новую схему БД
@@ -65,14 +76,14 @@ class ExampleGenerator:
         try:
             # Создаем ключ кэша на основе ID профиля базы данных
             cache_key = database_profile_id or analyzer.database_url
-            
+
             # Проверяем кэш
             if cache_key in self._adapted_examples_cache:
                 logger.info(f"Using cached adapted examples for database profile {database_profile_id}")
                 return self._adapted_examples_cache[cache_key]
 
             logger.info(f"Generating new adapted examples for database profile {database_profile_id}")
-            
+
             # Получаем структуру указанной БД
             db_structure = await self._get_database_structure_for_analyzer(analyzer)
 
@@ -303,58 +314,68 @@ class ExampleGenerator:
                 # Структурируем данные
                 tables = {}
                 for row in rows:
-                    table_name = row['table_name']
-                    schema_name = row.get('table_schema', 'public')
-                    full_table_name = f"{schema_name}.{table_name}" if schema_name != 'public' else table_name
-                    
+                    table_name = row["table_name"]
+                    schema_name = row.get("table_schema", "public")
+                    full_table_name = f"{schema_name}.{table_name}" if schema_name != "public" else table_name
+
                     if full_table_name not in tables:
                         tables[full_table_name] = {
-                            'name': full_table_name,
-                            'schema': schema_name,
-                            'type': row['table_type'],
-                            'columns': []
+                            "name": full_table_name,
+                            "schema": schema_name,
+                            "type": row["table_type"],
+                            "columns": [],
                         }
-                    
-                    if row['column_name']:  # Пропускаем строки без колонок
-                        tables[full_table_name]['columns'].append({
-                            'name': row['column_name'],
-                            'type': row['data_type'],
-                            'nullable': row['is_nullable'] == 'YES',
-                            'default': row['column_default'],
-                            'max_length': row['character_maximum_length'],
-                            'is_primary_key': row['is_primary_key'],
-                            'is_foreign_key': row['is_foreign_key'],
-                            'foreign_table': row['foreign_table_name'],
-                            'foreign_column': row['foreign_column_name']
-                        })
 
-                indexes = [{
-                    'schema': row['schemaname'],
-                    'table': row['tablename'],
-                    'name': row['indexname'],
-                    'definition': row['indexdef']
-                } for row in index_rows]
+                    if row["column_name"]:  # Пропускаем строки без колонок
+                        tables[full_table_name]["columns"].append(
+                            {
+                                "name": row["column_name"],
+                                "type": row["data_type"],
+                                "nullable": row["is_nullable"] == "YES",
+                                "default": row["column_default"],
+                                "max_length": row["character_maximum_length"],
+                                "is_primary_key": row["is_primary_key"],
+                                "is_foreign_key": row["is_foreign_key"],
+                                "foreign_table": row["foreign_table_name"],
+                                "foreign_column": row["foreign_column_name"],
+                            }
+                        )
 
-                constraints = [{
-                    'name': row['constraint_name'],
-                    'table': row['table_name'],
-                    'type': row['constraint_type'],
-                    'column': row['column_name']
-                } for row in constraint_rows]
+                indexes = [
+                    {
+                        "schema": row["schemaname"],
+                        "table": row["tablename"],
+                        "name": row["indexname"],
+                        "definition": row["indexdef"],
+                    }
+                    for row in index_rows
+                ]
+
+                constraints = [
+                    {
+                        "name": row["constraint_name"],
+                        "table": row["table_name"],
+                        "type": row["constraint_type"],
+                        "column": row["column_name"],
+                    }
+                    for row in constraint_rows
+                ]
 
                 return {
-                    'tables': list(tables.values()),
-                    'indexes': indexes,
-                    'constraints': constraints,
-                    'total_tables': len(tables),
-                    'database_info': await analyzer.get_database_info(),
+                    "tables": list(tables.values()),
+                    "indexes": indexes,
+                    "constraints": constraints,
+                    "total_tables": len(tables),
+                    "database_info": await analyzer.get_database_info(),
                 }
 
         except Exception as e:
             logger.error(f"Failed to get database structure for analyzer: {e}")
             return {"tables": [], "indexes": [], "constraints": [], "total_tables": 0, "database_info": {}}
 
-    async def _adapt_examples_to_database_schema(self, template_examples: List[Dict[str, Any]], db_structure: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def _adapt_examples_to_database_schema(
+        self, template_examples: List[Dict[str, Any]], db_structure: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
         """
         Адаптирует существующие примеры под новую схему базы данных
         """
@@ -390,30 +411,48 @@ class ExampleGenerator:
                 # Попробуем получить raw content и очистить его
                 raw_content = response.choices[0].message.content
                 if raw_content:
+                    logger.info(f"Attempting to parse raw content for adaptation: {raw_content[:100]}...")
                     # Более надежная очистка markdown код блоков
                     cleaned_content = self._clean_json_from_markdown(raw_content)
+                    logger.info(f"Cleaned content for adaptation: {cleaned_content[:100]}...")
                     try:
                         import json
+
                         parsed_data = json.loads(cleaned_content)
+
+                        # Обрабатываем разные структуры JSON
+                        examples_data = []
                         if isinstance(parsed_data, list):
-                            result = type('Result', (), {'examples': [type('Example', (), ex) for ex in parsed_data]})()
+                            # Прямой массив примеров
+                            examples_data = parsed_data
+                        elif isinstance(parsed_data, dict) and "examples" in parsed_data:
+                            # Объект с полем examples
+                            examples_data = parsed_data["examples"]
                         else:
-                            raise Exception("Invalid JSON structure")
+                            logger.error(f"Unexpected JSON structure for adaptation: {type(parsed_data)}")
+                            return []
+
+                        # Создаем результат в ожидаемом формате
+                        result = type("Result", (), {"examples": [type("Example", (), ex) for ex in examples_data]})()
+
                     except Exception as json_error:
-                        logger.error(f"Failed to parse cleaned JSON: {json_error}")
+                        logger.error(f"Failed to parse cleaned JSON for adaptation: {json_error}")
+                        logger.error(f"Raw content: {raw_content[:200]}...")
                         logger.error(f"Cleaned content: {cleaned_content[:200]}...")
                         return []
 
             # Преобразуем в нужный формат
             adapted_examples = []
             for example in result.examples:
-                adapted_examples.append({
-                    "name": example.name,
-                    "query": example.query,
-                    "description": example.description,
-                    "category": getattr(example, 'category', 'adapted'),
-                    "difficulty": getattr(example, 'difficulty', 'medium')
-                })
+                adapted_examples.append(
+                    {
+                        "name": example.name,
+                        "query": example.query,
+                        "description": example.description,
+                        "category": getattr(example, "category", "adapted"),
+                        "difficulty": getattr(example, "difficulty", "medium"),
+                    }
+                )
 
             return adapted_examples
 
@@ -427,28 +466,28 @@ class ExampleGenerator:
         """
         # Получаем информацию о таблицах новой БД
         tables_info = []
-        for table in db_structure.get('tables', []):
-            table_name = table['name']
+        for table in db_structure.get("tables", []):
+            table_name = table["name"]
             table_info = f"Таблица: {table_name}\n"
             table_info += f"  Тип: {table['type']}\n"
             table_info += "  Колонки:\n"
-            for column in table.get('columns', []):
+            for column in table.get("columns", []):
                 table_info += f"    - {column['name']} ({column['type']})"
-                if column.get('is_primary_key'):
+                if column.get("is_primary_key"):
                     table_info += " [PRIMARY KEY]"
-                if column.get('is_foreign_key'):
+                if column.get("is_foreign_key"):
                     table_info += f" [FOREIGN KEY -> {column['foreign_table']}.{column['foreign_column']}]"
                 table_info += "\n"
             tables_info.append(table_info)
-            
+
         # Добавляем пример использования
         if tables_info:
             tables_info.append("\nПРИМЕР ИСПОЛЬЗОВАНИЯ:")
             # Определяем схему на основе первой таблицы
-            first_table = db_structure.get('tables', [{}])[0]
-            table_name = first_table.get('name', 'table_name')
-            if '.' in table_name:
-                schema_prefix = table_name.split('.')[0] + '.'
+            first_table = db_structure.get("tables", [{}])[0]
+            table_name = first_table.get("name", "table_name")
+            if "." in table_name:
+                schema_prefix = table_name.split(".")[0] + "."
             else:
                 schema_prefix = ""
             tables_info.append(f"Используй полные имена таблиц: {schema_prefix}table_name")
@@ -458,7 +497,7 @@ class ExampleGenerator:
         template_list = []
         for i, example in enumerate(template_examples[:5], 1):  # Берем только первые 5 примеров
             # Сокращаем длинные запросы
-            query = example['query']
+            query = example["query"]
             if len(query) > 200:
                 query = query[:200] + "..."
             template_list.append(f"{i}. {example['name']}\n   Запрос: {query}\n   Описание: {example['description']}")
@@ -472,7 +511,7 @@ class ExampleGenerator:
 ШАБЛОНЫ:
 {chr(10).join(template_list)}
 
-ЗАДАЧА: 
+ЗАДАЧА:
 1. Замени названия таблиц на соответствующие из новой схемы (используй точные имена таблиц из схемы выше)
 2. Замени названия колонок на соответствующие из новой схемы
 3. Сохрани логику и структуру запросов
@@ -505,7 +544,7 @@ class ExampleGenerator:
 
             for path in possible_paths:
                 if path.exists():
-                    with open(path, "r", encoding="utf-8") as f:
+                    with open(path, encoding="utf-8") as f:
                         data = json.load(f)
                         return data.get("test_queries", [])
 
@@ -551,17 +590,33 @@ class ExampleGenerator:
                 # Попробуем получить raw content и очистить его
                 raw_content = response.choices[0].message.content
                 if raw_content:
+                    logger.info(f"Attempting to parse raw content for generation: {raw_content[:100]}...")
                     # Более надежная очистка markdown код блоков
                     cleaned_content = self._clean_json_from_markdown(raw_content)
+                    logger.info(f"Cleaned content for generation: {cleaned_content[:100]}...")
                     try:
                         import json
+
                         parsed_data = json.loads(cleaned_content)
+
+                        # Обрабатываем разные структуры JSON
+                        examples_data = []
                         if isinstance(parsed_data, list):
-                            result = type('Result', (), {'examples': [type('Example', (), ex) for ex in parsed_data]})()
+                            # Прямой массив примеров
+                            examples_data = parsed_data
+                        elif isinstance(parsed_data, dict) and "examples" in parsed_data:
+                            # Объект с полем examples
+                            examples_data = parsed_data["examples"]
                         else:
-                            raise Exception("Invalid JSON structure")
+                            logger.error(f"Unexpected JSON structure for generation: {type(parsed_data)}")
+                            return []
+
+                        # Создаем результат в ожидаемом формате
+                        result = type("Result", (), {"examples": [type("Example", (), ex) for ex in examples_data]})()
+
                     except Exception as json_error:
-                        logger.error(f"Failed to parse cleaned JSON: {json_error}")
+                        logger.error(f"Failed to parse cleaned JSON for generation: {json_error}")
+                        logger.error(f"Raw content: {raw_content[:200]}...")
                         logger.error(f"Cleaned content: {cleaned_content[:200]}...")
                         return []
 

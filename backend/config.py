@@ -1,9 +1,11 @@
+from typing import List, Optional
+
 from pydantic_settings import BaseSettings
-from typing import Optional, List
 
 
 class LLMModel:
     """Класс для представления конфигурации LLM модели"""
+
     def __init__(self, name: str, api_key: str, model: str, url: str):
         self.name = name
         self.api_key = api_key
@@ -41,6 +43,18 @@ class Settings(BaseSettings):
     llm_model_5: Optional[str] = None
     llm_url_5: Optional[str] = None
 
+    llm_api_key_6: Optional[str] = None
+    llm_model_6: Optional[str] = None
+    llm_url_6: Optional[str] = None
+
+    llm_api_key_7: Optional[str] = None
+    llm_model_7: Optional[str] = None
+    llm_url_7: Optional[str] = None
+
+    llm_api_key_8: Optional[str] = None
+    llm_model_8: Optional[str] = None
+    llm_url_8: Optional[str] = None
+
     # Application settings
     app_name: str = "PostgreSQL Query Analyzer"
     debug: bool = False
@@ -61,26 +75,18 @@ class Settings(BaseSettings):
         models = []
 
         # Основная модель
-        models.append(LLMModel(
-            name="Основная модель",
-            api_key=self.llm_api_key,
-            model=self.llm_model,
-            url=self.llm_url
-        ))
+        models.append(
+            LLMModel(name="Основная модель", api_key=self.llm_api_key, model=self.llm_model, url=self.llm_url)
+        )
 
         # Дополнительные модели
-        for i in range(1, 6):
+        for i in range(1, 9):
             api_key = getattr(self, f"llm_api_key_{i}", None)
             model = getattr(self, f"llm_model_{i}", None)
             url = getattr(self, f"llm_url_{i}", None)
 
             if api_key and model and url:
-                models.append(LLMModel(
-                    name=f"Модель {i}",
-                    api_key=api_key,
-                    model=model,
-                    url=url
-                ))
+                models.append(LLMModel(name=f"Модель {i}", api_key=api_key, model=model, url=url))
 
         return models
 

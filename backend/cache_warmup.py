@@ -1,13 +1,14 @@
-import json
 import asyncio
-import logging
 import hashlib
-from typing import List, Dict, Any
+import json
+import logging
 from pathlib import Path
-from database import PostgreSQLAnalyzer
-from llm_service import LLMAnalyzer
-from execution_plan_cache import ExecutionPlanCache
+from typing import Any, Dict, List
+
 from config import settings
+from database import PostgreSQLAnalyzer
+from execution_plan_cache import ExecutionPlanCache
+from llm_service import LLMAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class CacheWarmupService:
         self.llm_analyzer = LLMAnalyzer(selected_model=first_model)
         self.execution_plan_cache = ExecutionPlanCache()
         logger.info(f"Cache warmup using model: {first_model.name} ({first_model.model})")
-        
+
         # Ищем файл test_queries.json в разных возможных местах
         possible_paths = [
             Path(__file__).parent.parent / "test_queries.json",  # ../test_queries.json
@@ -37,7 +38,7 @@ class CacheWarmupService:
             if path.exists():
                 self.test_queries_file = path
                 break
-        
+
         # Cache directory for persistent storage
         # Try different paths for different environments
         possible_cache_paths = [
@@ -45,17 +46,17 @@ class CacheWarmupService:
             Path(__file__).parent.parent / "cache",  # Local development path
             Path("cache"),  # Current directory
         ]
-        
+
         self.cache_dir = None
         for path in possible_cache_paths:
             if path.exists() or path.parent.exists():
                 self.cache_dir = path
                 break
-        
+
         if not self.cache_dir:
             # Create cache directory in the most appropriate location
             self.cache_dir = Path("/app/cache") if Path("/app").exists() else Path(__file__).parent.parent / "cache"
-        
+
         self.cache_dir.mkdir(exist_ok=True)
         logger.info(f"Cache directory: {self.cache_dir}")
 
@@ -66,7 +67,7 @@ class CacheWarmupService:
             return []
 
         try:
-            with open(self.test_queries_file, "r", encoding="utf-8") as f:
+            with open(self.test_queries_file, encoding="utf-8") as f:
                 data = json.load(f)
                 return data.get("test_queries", [])
         except Exception as e:
@@ -94,7 +95,7 @@ class CacheWarmupService:
         """Сохраняет кэш в файл"""
         try:
             cache_file = self._get_cache_file_path(model_name)
-            with open(cache_file, 'w', encoding='utf-8') as f:
+            with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(cache_data, f, indent=2, ensure_ascii=False)
             logger.info(f"Cache saved to file: {cache_file}")
             return True
@@ -109,8 +110,8 @@ class CacheWarmupService:
             if not cache_file.exists():
                 logger.info(f"Cache file not found: {cache_file}")
                 return {}
-            
-            with open(cache_file, 'r', encoding='utf-8') as f:
+
+            with open(cache_file, encoding="utf-8") as f:
                 cache_data = json.load(f)
             logger.info(f"Cache loaded from file: {cache_file} ({len(cache_data)} entries)")
             return cache_data
@@ -118,41 +119,86 @@ class CacheWarmupService:
             logger.error(f"Failed to load cache from file: {e}")
             return {}
 
+    async def load_all_caches_into_analyzers(self) -> Dict[str, int]:
+        """
+        Загружает кэши для всех доступных моделей в их анализаторы
+        Возвращает словарь {model_name: loaded_count} с количеством загруженных записей
+        """
+        cache_stats = {}
+
+        try:
+            # Получаем все доступные модели
+            all_models = settings.get_available_models()
+            logger.info(f"Loading caches for {len(all_models)} models...")
+
+            for model in all_models:
+                try:
+                    # Загружаем кэш из файла для модели
+                    file_cache = await self.load_cache_from_file(model.model)
+
+                    if file_cache:
+                        # Создаем анализатор для этой модели
+                        model_analyzer = LLMAnalyzer(selected_model=model)
+
+                        # Загружаем кэш в анализатор
+                        await model_analyzer.load_cache_from_file(file_cache)
+
+                        cache_stats[model.name] = len(file_cache)
+                        logger.info(f"Loaded {len(file_cache)} cache entries for model: {model.name}")
+                    else:
+                        cache_stats[model.name] = 0
+                        logger.info(f"No cache file found for model: {model.name}")
+
+                except Exception as e:
+                    logger.error(f"Failed to load cache for model {model.name}: {e}")
+                    cache_stats[model.name] = -1  # Indicate error
+
+            total_loaded = sum(count for count in cache_stats.values() if count > 0)
+            logger.info(f"Cache loading completed: {total_loaded} total entries loaded across all models")
+
+            return cache_stats
+
+        except Exception as e:
+            logger.error(f"Failed to load caches for all models: {e}")
+            return {}
+
     async def save_rewritten_example(self, name: str, original_query: str, rewritten_query: str) -> bool:
         """Сохраняет переписанный пример запроса в файл"""
         try:
             rewritten_file = self.cache_dir / "rewritten_examples.json"
-            
+
             # Загружаем существующие переписанные примеры
             rewritten_examples = []
             if rewritten_file.exists():
-                with open(rewritten_file, 'r', encoding='utf-8') as f:
+                with open(rewritten_file, encoding="utf-8") as f:
                     data = json.load(f)
                     rewritten_examples = data.get("rewritten_examples", [])
-            
+
             # Проверяем, есть ли уже такой пример
             existing_example = next((ex for ex in rewritten_examples if ex["name"] == name), None)
-            
+
             if existing_example:
                 existing_example["original_query"] = original_query
                 existing_example["rewritten_query"] = rewritten_query
                 existing_example["updated_at"] = f"{asyncio.get_event_loop().time()}"
                 logger.info(f"Updated rewritten example: {name}")
             else:
-                rewritten_examples.append({
-                    "name": name,
-                    "original_query": original_query,
-                    "rewritten_query": rewritten_query,
-                    "created_at": f"{asyncio.get_event_loop().time()}"
-                })
+                rewritten_examples.append(
+                    {
+                        "name": name,
+                        "original_query": original_query,
+                        "rewritten_query": rewritten_query,
+                        "created_at": f"{asyncio.get_event_loop().time()}",
+                    }
+                )
                 logger.info(f"Added new rewritten example: {name}")
-            
+
             # Сохраняем обновленный файл
-            with open(rewritten_file, 'w', encoding='utf-8') as f:
+            with open(rewritten_file, "w", encoding="utf-8") as f:
                 json.dump({"rewritten_examples": rewritten_examples}, f, indent=2, ensure_ascii=False)
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to save rewritten example: {e}")
             return False
@@ -164,14 +210,14 @@ class CacheWarmupService:
             if not rewritten_file.exists():
                 logger.info("Rewritten examples file not found")
                 return []
-            
-            with open(rewritten_file, 'r', encoding='utf-8') as f:
+
+            with open(rewritten_file, encoding="utf-8") as f:
                 data = json.load(f)
                 examples = data.get("rewritten_examples", [])
-            
+
             logger.info(f"Loaded {len(examples)} rewritten examples")
             return examples
-            
+
         except Exception as e:
             logger.error(f"Failed to load rewritten examples: {e}")
             return []
@@ -179,11 +225,11 @@ class CacheWarmupService:
     async def warmup_cache_for_all_models(self, max_queries: int = 5, max_concurrent: int = 3) -> Dict[str, Any]:
         """Кэширует примеры для всех доступных моделей с ограничением параллельности"""
         logger.info("Starting cache warmup for ALL models with async semaphore...")
-        
+
         # Получаем все доступные модели
         all_models = settings.get_available_models()
         logger.info(f"Found {len(all_models)} models to warmup")
-        
+
         # Загружаем тестовые запросы
         test_queries = await self.load_test_queries()
         if not test_queries:
@@ -192,10 +238,10 @@ class CacheWarmupService:
 
         # Ограничиваем количество запросов для кэширования
         queries_to_process = test_queries[:max_queries]
-        
+
         # Создаем семафор для ограничения параллельности
         semaphore = asyncio.Semaphore(max_concurrent)
-        
+
         total_processed = 0
         total_errors = 0
         model_results = {}
@@ -205,38 +251,40 @@ class CacheWarmupService:
             async with semaphore:
                 try:
                     logger.info(f"Warming up cache for model: {model.name} ({model.model})")
-                    
+
                     # Создаем анализатор для этой модели
                     model_analyzer = LLMAnalyzer(selected_model=model)
-                    
+
                     # Загружаем существующий кэш из файла
                     file_cache = await self.load_cache_from_file(model.model)
                     if file_cache:
                         # Загружаем кэш в анализатор
                         model_analyzer._cache.update(file_cache)
                         logger.info(f"Loaded {len(file_cache)} entries from file cache for {model.name}")
-                    
+
                     model_processed = 0
                     model_errors = 0
-                    
+
                     # Создаем семафор для запросов внутри модели тоже
                     query_semaphore = asyncio.Semaphore(2)
-                    
+
                     async def process_query(i, query_data):
                         """Обрабатывает один запрос"""
                         async with query_semaphore:
                             try:
                                 query = query_data["query"]
                                 name = query_data["name"]
-                                
+
                                 # Проверяем, есть ли уже кэш для этого запроса
                                 cache_key = self._create_cache_key(model.model, query, {})
                                 if cache_key in model_analyzer._cache:
                                     logger.info(f"Skipping {name} - already cached for {model.name}")
                                     return 0, 0
-                                
-                                logger.info(f"Processing query {i+1}/{len(queries_to_process)} for {model.name}: {name}")
-                                
+
+                                logger.info(
+                                    f"Processing query {i+1}/{len(queries_to_process)} for {model.name}: {name}"
+                                )
+
                                 # Получаем план выполнения (с кэшированием)
                                 database_url = self.db_analyzer.database_url
                                 cached_plan = self.execution_plan_cache.get_plan(query, database_url)
@@ -248,25 +296,25 @@ class CacheWarmupService:
                                     plan_data = await self.db_analyzer.analyze_query_performance(query)
                                     # Сохраняем план в кэш
                                     self.execution_plan_cache.set_plan(query, database_url, plan_data)
-                                
+
                                 # Анализируем с помощью LLM (это добавит результат в кэш)
                                 llm_result = await model_analyzer.analyze_query_with_llm(query, plan_data["plan_json"])
-                                
+
                                 # Сохраняем переписанный запрос, если есть
                                 if llm_result.get("rewritten_query"):
                                     await self.save_rewritten_example(name, query, llm_result["rewritten_query"])
-                                
+
                                 logger.info(f"Successfully cached query for {model.name}: {name}")
                                 return 1, 0
-                                
+
                             except Exception as e:
                                 logger.error(f"Failed to process query '{name}' for {model.name}: {e}")
                                 return 0, 1
-                    
+
                     # Запускаем обработку всех запросов параллельно для модели
                     tasks = [process_query(i, query_data) for i, query_data in enumerate(queries_to_process)]
                     results = await asyncio.gather(*tasks, return_exceptions=True)
-                    
+
                     for result in results:
                         if isinstance(result, Exception):
                             model_errors += 1
@@ -274,32 +322,29 @@ class CacheWarmupService:
                             processed, errors = result
                             model_processed += processed
                             model_errors += errors
-                    
+
                     # Сохраняем кэш в файл
                     await self.save_cache_to_file(model.model, model_analyzer._cache)
-                    
-                    logger.info(f"Model {model.name} warmup completed: {model_processed} processed, {model_errors} errors")
-                    
+
+                    logger.info(
+                        f"Model {model.name} warmup completed: {model_processed} processed, {model_errors} errors"
+                    )
+
                     return {
                         "model": model.name,
                         "processed": model_processed,
                         "errors": model_errors,
-                        "cache_size": len(model_analyzer._cache)
+                        "cache_size": len(model_analyzer._cache),
                     }
-                    
+
                 except Exception as e:
                     logger.error(f"Failed to warmup model {model.name}: {e}")
-                    return {
-                        "model": model.name,
-                        "processed": 0,
-                        "errors": 1,
-                        "cache_size": 0
-                    }
+                    return {"model": model.name, "processed": 0, "errors": 1, "cache_size": 0}
 
         # Запускаем прогрев всех моделей параллельно
         model_tasks = [warmup_model(model) for model in all_models]
         model_results_list = await asyncio.gather(*model_tasks, return_exceptions=True)
-        
+
         # Собираем результаты
         for result in model_results_list:
             if isinstance(result, Exception):
@@ -309,7 +354,7 @@ class CacheWarmupService:
                 model_results[result["model"]] = {
                     "processed": result["processed"],
                     "errors": result["errors"],
-                    "cache_size": result["cache_size"]
+                    "cache_size": result["cache_size"],
                 }
                 total_processed += result["processed"]
                 total_errors += result["errors"]
@@ -322,7 +367,9 @@ class CacheWarmupService:
             "models": model_results,
         }
 
-        logger.info(f"All models cache warmup completed: {total_processed} total processed, {total_errors} total errors")
+        logger.info(
+            f"All models cache warmup completed: {total_processed} total processed, {total_errors} total errors"
+        )
         return warmup_result
 
     async def warmup_cache(self, max_queries: int = 5) -> Dict[str, Any]:
@@ -405,7 +452,9 @@ class CacheWarmupService:
             "results": results,
         }
 
-        logger.info(f"Cache warmup completed for model {self.llm_analyzer.model}: {processed} processed, {errors} errors")
+        logger.info(
+            f"Cache warmup completed for model {self.llm_analyzer.model}: {processed} processed, {errors} errors"
+        )
         return warmup_result
 
     async def warmup_new_examples(self, max_queries: int = 5) -> Dict[str, Any]:
@@ -431,7 +480,7 @@ class CacheWarmupService:
 
         # Иначе кэшируем запросы, начиная с позиции после уже закэшированных
         start_index = min(current_cache_size, len(test_queries))
-        queries_to_process = test_queries[start_index:start_index + max_queries]
+        queries_to_process = test_queries[start_index : start_index + max_queries]
 
         if not queries_to_process:
             logger.info("No new queries to cache")
@@ -493,7 +542,9 @@ class CacheWarmupService:
             "results": results,
         }
 
-        logger.info(f"New examples cache warmup completed for model {self.llm_analyzer.model}: {processed} processed, {errors} errors")
+        logger.info(
+            f"New examples cache warmup completed for model {self.llm_analyzer.model}: {processed} processed, {errors} errors"
+        )
         return warmup_result
 
     async def test_cache_hit(self, query: str) -> Dict[str, Any]:

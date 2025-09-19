@@ -6,25 +6,33 @@ PostgreSQL Query Analyzer Backend
 с использованием LLM и structured output.
 """
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-import logging
 import asyncio
 import inspect
+import logging
 from datetime import datetime
 
-from models import QueryAnalysisRequest, QueryAnalysis, ExecutionPlan, HealthCheck, DatabaseConfig, ExecutionPlanResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+
+from cache_warmup import CacheWarmupService
+from config import settings
+from config_analyzer import PostgreSQLConfigAnalyzer
 from database import PostgreSQLAnalyzer
+
+# Security module removed - allowing all database connections
+from database_profiles import profile_manager
+from example_generator import ExampleGenerator
+from execution_plan_cache import ExecutionPlanCache
 from llm_service import LLMAnalyzer
 from log_analyzer import PostgreSQLLogAnalyzer
-from config_analyzer import PostgreSQLConfigAnalyzer
-from cache_warmup import CacheWarmupService
-from example_generator import ExampleGenerator
-from table_stats_service import TableStatsService
-from config import settings
-# Security module removed - allowing all database connections
-from database_profiles import profile_manager, DatabaseProfile
-from execution_plan_cache import ExecutionPlanCache
+from models import (
+    DatabaseConfig,
+    ExecutionPlan,
+    ExecutionPlanResponse,
+    HealthCheck,
+    QueryAnalysis,
+    QueryAnalysisRequest,
+)
 from services.query_analysis import (
     QueryAnalysisError,
     build_execution_plan_model,
@@ -35,6 +43,7 @@ from services.query_analysis import (
     resolve_analyzer,
     validate_query_text,
 )
+from table_stats_service import TableStatsService
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -42,9 +51,7 @@ logger = logging.getLogger(__name__)
 
 # Создание FastAPI приложения
 app = FastAPI(
-    title=settings.app_name,
-    description="Умный инструмент для анализа SQL-запросов PostgreSQL",
-    version="1.0.0"
+    title=settings.app_name, description="Умный инструмент для анализа SQL-запросов PostgreSQL", version="1.0.0"
 )
 
 # Настройка CORS
@@ -88,52 +95,47 @@ async def create_default_database_profiles():
     try:
         # Парсим URL основной базы данных
         from urllib.parse import urlparse
+
         parsed_url = urlparse(settings.database_url)
-        
+
         # Извлекаем компоненты подключения для localhost
         host = parsed_url.hostname or "localhost"
         port = parsed_url.port or 5432
-        database = parsed_url.path.lstrip('/') or "query_analyzer"
+        database = parsed_url.path.lstrip("/") or "query_analyzer"
         username = parsed_url.username or "analyzer_user"
         password = parsed_url.password or "analyzer_pass"
-        
+
         # Проверяем существующие профили
         existing_profiles = profile_manager.list_profiles()
-        
+
         # 1. Создаём профиль по умолчанию (localhost)
         default_profile_exists = any(
-            profile.name == "Default Database" and 
-            profile.host == host and 
-            profile.port == port and 
-            profile.database == database and 
-            profile.username == username
+            profile.name == "Default Database"
+            and profile.host == host
+            and profile.port == port
+            and profile.database == database
+            and profile.username == username
             for profile in existing_profiles
         )
-        
+
         if not default_profile_exists:
             success, result = await profile_manager.create_profile(
-                name="Default Database",
-                host=host,
-                port=port,
-                database=database,
-                username=username,
-                password=password
+                name="Default Database", host=host, port=port, database=database, username=username, password=password
             )
-            
+
             if success:
                 logger.info(f"Created default database profile: {result}")
             else:
                 logger.warning(f"Failed to create default database profile: {result}")
         else:
             logger.info("Default database profile already exists")
-        
+
         # 2. Создаём профиль RNA Central
         rna_central_exists = any(
-            profile.name == "RNA Central Database" and 
-            profile.host == "hh-pgsql-public.ebi.ac.uk"
+            profile.name == "RNA Central Database" and profile.host == "hh-pgsql-public.ebi.ac.uk"
             for profile in existing_profiles
         )
-        
+
         if not rna_central_exists:
             try:
                 success, result = await profile_manager.create_profile(
@@ -142,20 +144,22 @@ async def create_default_database_profiles():
                     port=5432,
                     database="pfmegrnargs",
                     username="reader",
-                    password="NWDMCE5xdipIjRrp"
+                    password="NWDMCE5xdipIjRrp",
                 )
-                
+
                 if success:
                     logger.info(f"Created RNA Central database profile: {result}")
                     # Test query chains specifically for this database
                     try:
                         connection = profile_manager.get_connection(result)
                         if connection:
-                            analyzer = PostgreSQLAnalyzer(connection.get_connection_url())
+                            PostgreSQLAnalyzer(connection.get_connection_url())
                             # Test a simple query chain to ensure it works
                             test_chain = "SELECT 1 as test; SELECT 2 as test2;"
                             main_query, all_text = extract_main_query(test_chain)
-                            logger.info(f"RNA Central DB query chain test - Main: '{main_query[:50]}...', Full: '{all_text[:100]}...'")
+                            logger.info(
+                                f"RNA Central DB query chain test - Main: '{main_query[:50]}...', Full: '{all_text[:100]}...'"
+                            )
                             if ";" in all_text:
                                 logger.info("Query chains are properly detected for RNA Central database")
                             else:
@@ -170,10 +174,7 @@ async def create_default_database_profiles():
             logger.info("RNA Central database profile already exists")
             # Still test query chains for existing profile
             try:
-                rna_profile = next(
-                    profile for profile in existing_profiles 
-                    if profile.name == "RNA Central Database"
-                )
+                rna_profile = next(profile for profile in existing_profiles if profile.name == "RNA Central Database")
                 connection = profile_manager.get_connection(rna_profile.id)
                 if connection:
                     test_chain = "SELECT 1 as test; SELECT 2 as test2;"
@@ -184,41 +185,55 @@ async def create_default_database_profiles():
                         logger.warning("Query chains may have issues with existing RNA Central database profile")
             except Exception as existing_test_error:
                 logger.warning(f"Could not test existing RNA Central profile: {existing_test_error}")
-            
+
     except Exception as e:
         logger.error(f"Error creating default database profiles: {e}")
 
 
 async def startup_load_cache():
-    """Загружает кэш для основной модели из файла при запуске"""
+    """Загружает кэши для всех доступных моделей из файлов при запуске"""
     try:
-        logger.info("Loading cache for main model from file...")
-        
-        # Получаем основную модель
+        logger.info("Loading caches for all models from files...")
+
+        # Загружаем кэши для всех моделей
+        cache_stats = await cache_warmup.load_all_caches_into_analyzers()
+
+        total_loaded = sum(count for count in cache_stats.values() if count > 0)
+        failed_models = [model for model, count in cache_stats.items() if count == -1]
+
+        logger.info(f"Cache loading completed: {total_loaded} total entries loaded")
+        for model_name, count in cache_stats.items():
+            if count > 0:
+                logger.info(f"  - {model_name}: {count} entries")
+            elif count == 0:
+                logger.info(f"  - {model_name}: no cache found")
+            else:
+                logger.warning(f"  - {model_name}: failed to load")
+
+        if failed_models:
+            logger.warning(f"Failed to load cache for models: {', '.join(failed_models)}")
+
+        # Также загружаем кэш в основной анализатор для совместимости
         main_model = llm_analyzer.selected_model
-        
-        # Загружаем кэш из файла
-        file_cache = await cache_warmup.load_cache_from_file(main_model.model)
-        if file_cache:
-            # Загружаем кэш в основной анализатор
-            await llm_analyzer.load_cache_from_file(file_cache)
-            logger.info(f"Loaded {len(file_cache)} cache entries for main model: {main_model.name}")
-        else:
-            logger.info("No cache file found for main model")
-            
+        if main_model.name in cache_stats and cache_stats[main_model.name] > 0:
+            file_cache = await cache_warmup.load_cache_from_file(main_model.model)
+            if file_cache:
+                await llm_analyzer.load_cache_from_file(file_cache)
+                logger.info(f"Main analyzer cache updated with {len(file_cache)} entries")
+
     except Exception as e:
-        logger.error(f"Failed to load cache for main model: {e}")
+        logger.error(f"Failed to load caches: {e}")
 
 
 async def startup_load_execution_plan_cache():
     """Загружает кэш планов выполнения из файла при запуске"""
     try:
         logger.info("Loading execution plan cache from file...")
-        
+
         # Загружаем кэш планов выполнения из файла
         execution_plan_cache.load_cache_from_file()
         logger.info(f"Loaded execution plan cache with {len(execution_plan_cache._cache)} entries")
-            
+
     except Exception as e:
         logger.error(f"Failed to load execution plan cache: {e}")
 
@@ -228,7 +243,7 @@ async def startup_load_rewritten_examples():
     try:
         logger.info("Loading rewritten examples at startup...")
         rewritten_examples = await cache_warmup.load_rewritten_examples()
-        
+
         if rewritten_examples:
             logger.info(f"Loaded {len(rewritten_examples)} rewritten examples from cache")
             # Можно добавить глобальную переменную для хранения переписанных примеров
@@ -237,29 +252,32 @@ async def startup_load_rewritten_examples():
         else:
             logger.info("No rewritten examples found in cache")
             rewritten_examples_cache = []
-            
+
     except Exception as e:
         logger.error(f"Failed to load rewritten examples: {e}")
         rewritten_examples_cache = []
+
 
 async def startup_precompute_execution_plans():
     """Предварительно вычисляет планы выполнения для тестовых запросов"""
     try:
         logger.info("Pre-computing execution plans for test queries...")
-        
+
         # Загружаем тестовые запросы
         test_queries = await cache_warmup.load_test_queries()
         if not test_queries:
             logger.warning("No test queries found for execution plan pre-computation")
             return
-        
+
         # Предварительно вычисляем планы выполнения для всех профилей баз данных
         result = await execution_plan_cache.precompute_for_all_database_profiles(
             profile_manager, test_queries, max_queries_per_db=5
         )
-        
-        logger.info(f"Execution plan pre-computation completed: {result['total_processed']} total processed, {result['total_errors']} total errors across {result['total_profiles']} database profiles")
-            
+
+        logger.info(
+            f"Execution plan pre-computation completed: {result['total_processed']} total processed, {result['total_errors']} total errors across {result['total_profiles']} database profiles"
+        )
+
     except Exception as e:
         logger.error(f"Failed to pre-compute execution plans: {e}")
 
@@ -283,16 +301,16 @@ async def startup_event():
         if db_connected and openai_available:
             # Загружаем кэш для основной модели из файла
             await startup_load_cache()
-            
+
             # Загружаем кэш планов выполнения
             await startup_load_execution_plan_cache()
-            
+
             # Загружаем переписанные примеры
             await startup_load_rewritten_examples()
-            
+
             # Предварительно вычисляем планы выполнения
             await startup_precompute_execution_plans()
-            
+
             # Запускаем кэширование и генерацию примеров в фоне
             asyncio.create_task(startup_cache_warmup())
             asyncio.create_task(startup_example_generation())
@@ -312,9 +330,13 @@ async def startup_cache_warmup():
         await asyncio.sleep(15)
 
         logger.info("Starting background cache warmup for all models with Semaphore(3)...")
-        result = await cache_warmup.warmup_cache_for_all_models(max_queries=20, max_concurrent=3)  # Кэшируем все примеры для всех моделей при запуске с семафором
+        result = await cache_warmup.warmup_cache_for_all_models(
+            max_queries=20, max_concurrent=3
+        )  # Кэшируем все примеры для всех моделей при запуске с семафором
 
-        logger.info(f"Background cache warmup completed: {result['total_processed']} queries cached across {len(result['models'])} models")
+        logger.info(
+            f"Background cache warmup completed: {result['total_processed']} queries cached across {len(result['models'])} models"
+        )
 
     except Exception as e:
         logger.error(f"Background cache warmup failed: {e}")
@@ -345,7 +367,9 @@ async def startup_example_generation():
                 try:
                     # Кэшируем только новые примеры (пропускаем уже закэшированные)
                     additional_result = await cache_warmup.warmup_new_examples(max_queries=5)
-                    logger.info(f"Additional cache warmup completed: {additional_result['processed']} new queries cached")
+                    logger.info(
+                        f"Additional cache warmup completed: {additional_result['processed']} new queries cached"
+                    )
                 except Exception as e:
                     logger.error(f"Additional cache warmup failed: {e}")
             else:
@@ -365,10 +389,10 @@ async def startup_table_statistics():
         global table_statistics
         table_statistics = await db_analyzer.get_table_statistics()
 
-        if table_statistics['tables']:
-            total_tables = table_statistics['total_tables']
-            total_tuples = table_statistics['total_live_tuples']
-            total_size = table_statistics['total_size_bytes']
+        if table_statistics["tables"]:
+            total_tables = table_statistics["total_tables"]
+            total_tuples = table_statistics["total_live_tuples"]
+            total_size = table_statistics["total_size_bytes"]
 
             logger.info(
                 f"Table statistics loaded: {total_tables} tables, "
@@ -399,18 +423,12 @@ async def health_check():
         status = "healthy" if db_connected and openai_available else "unhealthy"
 
         return HealthCheck(
-            status=status,
-            timestamp=datetime.now(),
-            database_connected=db_connected,
-            openai_available=openai_available
+            status=status, timestamp=datetime.now(), database_connected=db_connected, openai_available=openai_available
         )
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return HealthCheck(
-            status="unhealthy",
-            timestamp=datetime.now(),
-            database_connected=False,
-            openai_available=False
+            status="unhealthy", timestamp=datetime.now(), database_connected=False, openai_available=False
         )
 
 
@@ -425,11 +443,11 @@ async def get_available_models():
                     "name": model.name,
                     "model": model.model,
                     "url": model.url,
-                    "is_current": model.name == llm_analyzer.selected_model.name
+                    "is_current": model.name == llm_analyzer.selected_model.name,
                 }
                 for model in models
             ],
-            "current_model": llm_analyzer.selected_model.name
+            "current_model": llm_analyzer.selected_model.name,
         }
     except Exception as e:
         logger.error(f"Failed to get models: {e}")
@@ -450,11 +468,7 @@ async def switch_model(model_name: str):
         return {
             "message": f"Successfully switched to {model.name}",
             "current_model": model.name,
-            "model_info": {
-                "name": model.name,
-                "model": model.model,
-                "url": model.url
-            }
+            "model_info": {"name": model.name, "model": model.model, "url": model.url},
         }
     except HTTPException:
         raise
@@ -491,9 +505,7 @@ async def analyze_query(request: QueryAnalysisRequest):
         logger.info("Running LLM analysis...")
         global table_statistics
         query_for_llm = determine_llm_query(plan_data["plan_json"], all_queries_text)
-        llm_result = await llm_analyzer.analyze_query_with_llm(
-            query_for_llm, plan_data["plan_json"], table_statistics
-        )
+        llm_result = await llm_analyzer.analyze_query_with_llm(query_for_llm, plan_data["plan_json"], table_statistics)
 
         rewritten_query = refined_rewritten_query(
             request_query=request.query,
@@ -591,9 +603,7 @@ async def analyze_with_llm(request: QueryAnalysisRequest):
         logger.info("Running LLM analysis...")
         global table_statistics
         query_for_llm = determine_llm_query(plan_data["plan_json"], all_queries_text)
-        llm_result = await llm_analyzer.analyze_query_with_llm(
-            query_for_llm, plan_data["plan_json"], table_statistics
-        )
+        llm_result = await llm_analyzer.analyze_query_with_llm(query_for_llm, plan_data["plan_json"], table_statistics)
 
         rewritten_query = refined_rewritten_query(
             request_query=request.query,
@@ -607,7 +617,7 @@ async def analyze_with_llm(request: QueryAnalysisRequest):
             "resource_metrics": llm_result["resource_metrics"],
             "recommendations": llm_result["recommendations"],
             "warnings": llm_result.get("warnings", []),
-            "status": "llm_analysis_ready"
+            "status": "llm_analysis_ready",
         }
 
     except QueryAnalysisError as exc:
@@ -635,8 +645,7 @@ async def test_database_connection(config: DatabaseConfig):
     """Тестирует подключение к указанной базе данных"""
     try:
         database_url = (
-            f"postgresql://{config.username}:{config.password}@"
-            f"{config.host}:{config.port}/{config.database}"
+            f"postgresql://{config.username}:{config.password}@" f"{config.host}:{config.port}/{config.database}"
         )
 
         # Database URL validation removed - allowing all connections
@@ -661,7 +670,7 @@ async def get_example_queries(database_profile_id: str = None):
     try:
         # Определяем какую базу данных использовать для генерации примеров
         analyzer = db_analyzer  # По умолчанию используем основную БД
-        
+
         if database_profile_id:
             # Используем выбранный профиль базы данных
             connection = profile_manager.get_connection(database_profile_id)
@@ -677,22 +686,28 @@ async def get_example_queries(database_profile_id: str = None):
                     if profile.name == "Default Database":
                         success, result = await profile_manager.refresh_connection(database_profile_id, "analyzer_pass")
                     elif profile.name == "RNA Central Database":
-                        success, result = await profile_manager.refresh_connection(database_profile_id, "NWDMCE5xdipIjRrp")
+                        success, result = await profile_manager.refresh_connection(
+                            database_profile_id, "NWDMCE5xdipIjRrp"
+                        )
                     else:
                         success = False
-                    
+
                     if success:
                         connection = profile_manager.get_connection(database_profile_id)
                         if connection:
                             analyzer = PostgreSQLAnalyzer(connection.get_connection_url())
                             logger.info(f"Reconnected to database profile {database_profile_id}")
                         else:
-                            logger.warning(f"Failed to reconnect to database profile {database_profile_id}, using default")
+                            logger.warning(
+                                f"Failed to reconnect to database profile {database_profile_id}, using default"
+                            )
                     else:
-                        logger.warning(f"Failed to refresh connection for database profile {database_profile_id}, using default")
+                        logger.warning(
+                            f"Failed to refresh connection for database profile {database_profile_id}, using default"
+                        )
                 else:
                     logger.warning(f"Database profile {database_profile_id} not found, using default")
-        
+
         # Загружаем примеры из test_queries.json
         test_queries = await cache_warmup.load_test_queries()
 
@@ -706,11 +721,15 @@ async def get_example_queries(database_profile_id: str = None):
             else:
                 # Для внешних БД (например, RNA Central) адаптируем примеры под их схему
                 try:
-                    adapted_examples = await example_generator.generate_examples_with_llm_for_database(analyzer, database_profile_id)
+                    adapted_examples = await example_generator.generate_examples_with_llm_for_database(
+                        analyzer, database_profile_id
+                    )
                     if adapted_examples:
                         # Заменяем стандартные примеры на адаптированные
                         test_queries = adapted_examples
-                        logger.info(f"Adapted {len(adapted_examples)} examples for external database profile {database_profile_id}")
+                        logger.info(
+                            f"Adapted {len(adapted_examples)} examples for external database profile {database_profile_id}"
+                        )
                 except Exception as e:
                     logger.warning(f"Failed to adapt examples for database profile: {e}")
                     # В случае ошибки используем стандартные примеры
@@ -865,12 +884,10 @@ async def precompute_execution_plans(max_queries: int = 10):
         test_queries = await cache_warmup.load_test_queries()
         if not test_queries:
             return {"status": "no_queries", "message": "No test queries found"}
-        
+
         # Предварительно вычисляем планы выполнения
-        result = await execution_plan_cache.precompute_execution_plans(
-            db_analyzer, test_queries, max_queries
-        )
-        
+        result = await execution_plan_cache.precompute_execution_plans(db_analyzer, test_queries, max_queries)
+
         return {"status": "success", "precompute_result": result}
     except Exception as e:
         logger.error(f"Execution plan pre-computation failed: {e}")
@@ -885,12 +902,12 @@ async def precompute_execution_plans_all_databases(max_queries_per_db: int = 5):
         test_queries = await cache_warmup.load_test_queries()
         if not test_queries:
             return {"status": "no_queries", "message": "No test queries found"}
-        
+
         # Предварительно вычисляем планы выполнения для всех профилей баз данных
         result = await execution_plan_cache.precompute_for_all_database_profiles(
             profile_manager, test_queries, max_queries_per_db
         )
-        
+
         return {"status": "success", "precompute_result": result}
     except Exception as e:
         logger.error(f"All databases execution plan pre-computation failed: {e}")
@@ -969,11 +986,7 @@ async def get_table_statistics():
             # Если статистика не загружена, загружаем её
             table_statistics = await db_analyzer.get_table_statistics()
 
-        return {
-            "status": "success",
-            "statistics": table_statistics,
-            "timestamp": datetime.now().isoformat()
-        }
+        return {"status": "success", "statistics": table_statistics, "timestamp": datetime.now().isoformat()}
     except Exception as e:
         logger.error(f"Failed to get table statistics: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get table statistics: {str(e)}")
@@ -1014,33 +1027,26 @@ async def test_cache_hit(request: QueryAnalysisRequest):
 
 # === DATABASE PROFILES API ===
 
+
 @app.post("/database/profiles")
-async def create_database_profile(
-    name: str,
-    host: str,
-    port: int,
-    database: str,
-    username: str,
-    password: str
-):
+async def create_database_profile(name: str, host: str, port: int, database: str, username: str, password: str):
     """Create a new database profile"""
     try:
         success, result = await profile_manager.create_profile(
-            name=name, host=host, port=port, 
-            database=database, username=username, password=password
+            name=name, host=host, port=port, database=database, username=username, password=password
         )
-        
+
         if success:
             profile = profile_manager.get_profile(result)
             return {
                 "status": "success",
                 "profile_id": result,
                 "profile": profile.dict() if profile else None,
-                "message": "Database profile created successfully"
+                "message": "Database profile created successfully",
             }
         else:
             return {"status": "error", "message": result}
-            
+
     except Exception as e:
         logger.error(f"Failed to create database profile: {e}")
         raise HTTPException(status_code=500, detail=f"Profile creation failed: {str(e)}")
@@ -1051,11 +1057,7 @@ async def list_database_profiles():
     """List all database profiles"""
     try:
         profiles = profile_manager.list_profiles()
-        return {
-            "status": "success",
-            "profiles": [profile.dict() for profile in profiles],
-            "count": len(profiles)
-        }
+        return {"status": "success", "profiles": [profile.dict() for profile in profiles], "count": len(profiles)}
     except Exception as e:
         logger.error(f"Failed to list profiles: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to list profiles: {str(e)}")
@@ -1066,12 +1068,12 @@ async def connect_to_profile(profile_id: str, password: str):
     """Connect to a database profile"""
     try:
         success, message = await profile_manager.refresh_connection(profile_id, password)
-        
+
         if success:
             return {"status": "success", "message": message}
         else:
             return {"status": "error", "message": message}
-            
+
     except Exception as e:
         logger.error(f"Failed to connect to profile {profile_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Connection failed: {str(e)}")
@@ -1082,12 +1084,12 @@ async def delete_database_profile(profile_id: str):
     """Delete a database profile"""
     try:
         success = profile_manager.delete_profile(profile_id)
-        
+
         if success:
             return {"status": "success", "message": "Profile deleted successfully"}
         else:
             return {"status": "error", "message": "Profile not found"}
-            
+
     except Exception as e:
         logger.error(f"Failed to delete profile {profile_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Deletion failed: {str(e)}")
@@ -1100,18 +1102,14 @@ async def get_profile_database_info(profile_id: str):
         connection = profile_manager.get_connection(profile_id)
         if not connection:
             raise HTTPException(status_code=404, detail="Profile not found or not connected")
-        
+
         analyzer = PostgreSQLAnalyzer(connection.get_connection_url())
         info = await analyzer.get_database_info()
-        
+
         profile_manager.update_last_used(profile_id)
-        
-        return {
-            "status": "success",
-            "profile_id": profile_id,
-            "database_info": info
-        }
-        
+
+        return {"status": "success", "profile_id": profile_id, "database_info": info}
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1124,27 +1122,21 @@ async def create_or_refresh_default_profiles():
     """Create or refresh the default database profiles"""
     try:
         await create_default_database_profiles()
-        
+
         # Найдём созданные профили по умолчанию
         profiles = profile_manager.list_profiles()
-        default_profile = next(
-            (p for p in profiles if p.name == "Default Database"), 
-            None
-        )
-        rna_central_profile = next(
-            (p for p in profiles if p.name == "RNA Central Database"), 
-            None
-        )
-        
+        default_profile = next((p for p in profiles if p.name == "Default Database"), None)
+        rna_central_profile = next((p for p in profiles if p.name == "RNA Central Database"), None)
+
         return {
             "status": "success",
             "message": "Default database profiles created/refreshed successfully",
             "profiles": {
                 "default": default_profile.dict() if default_profile else None,
-                "rna_central": rna_central_profile.dict() if rna_central_profile else None
-            }
+                "rna_central": rna_central_profile.dict() if rna_central_profile else None,
+            },
         }
-            
+
     except Exception as e:
         logger.error(f"Failed to create/refresh default profiles: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create default profiles: {str(e)}")

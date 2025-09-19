@@ -1,0 +1,2023 @@
+{
+  "f08e9169ac5675be07a3ed33e6686b91": {
+    "query": "SELECT * FROM users WHERE email = 'john@example.com'",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 5.0,
+      "memory_usage": 0.5,
+      "io_operations": 2,
+      "disk_reads": 2,
+      "disk_writes": 0,
+      "disk_io": 2.0,
+      "network_io": 0.1,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 100.0,
+      "cache_hit_ratio": 95.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "medium",
+        "title": "Оптимизация индекса",
+        "description": "Создание покрывающего индекса для исключения доступа к таблице",
+        "potential_improvement": "Позволит полностью исключить доступ к таблице данных, так как все необходимые поля будут содержаться в индексе",
+        "implementation": "CREATE INDEX idx_users_email_covering ON users (email) INCLUDE (id, name, и другие часто запрашиваемые поля)",
+        "estimated_speedup": 15.0
+      },
+      {
+        "type": "query_rewrite",
+        "priority": "low",
+        "title": "Оптимизация выборки полей",
+        "description": "Замена SELECT * на явное перечисление необходимых полей",
+        "potential_improvement": "Уменьшит объем передаваемых данных и позволит использовать более узкий покрывающий индекс",
+        "implementation": "SELECT id, name, email, created_at FROM users WHERE email = 'john@example.com'",
+        "estimated_speedup": 10.0
+      }
+    ],
+    "warnings": [
+      "Запрос возвращает 0 строк, что может указывать на отсутствие пользователя с указанным email",
+      "SELECT * может возвращать избыточные данные, особенно если в таблице есть большие поля (BLOB, TEXT)",
+      "Ширина записи (449 байт) указывает на относительно большой размер строки. Если не все поля нужны, их следует исключить из запроса"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "0d87c2d8bc360dc7c807e52ac5761402": {
+    "query": "SELECT u.name, COUNT(o.id) as order_count, SUM(o.total_amount) as total_spent FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE u.is_active = true GROUP BY u.id, u.name ORDER BY total_spent DESC",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 75.0,
+      "memory_usage": 0.05,
+      "io_operations": 2,
+      "disk_reads": 2,
+      "disk_writes": 0,
+      "disk_io": 2.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 775,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс для фильтрации активных пользователей",
+        "description": "Создание индекса на users.is_active",
+        "potential_improvement": "Ускорит фильтрацию активных пользователей, исключив полное сканирование таблицы users",
+        "implementation": "CREATE INDEX idx_users_is_active ON users(is_active);",
+        "estimated_speedup": 40.0
+      },
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс для соединения таблиц",
+        "description": "Создание индекса на orders.user_id",
+        "potential_improvement": "Значительно ускорит операцию JOIN, заменив Seq Scan на Index Scan",
+        "implementation": "CREATE INDEX idx_orders_user_id ON orders(user_id);",
+        "estimated_speedup": 60.0
+      },
+      {
+        "type": "index",
+        "priority": "medium",
+        "title": "Покрывающий индекс для users",
+        "description": "Создание составного индекса для таблицы users",
+        "potential_improvement": "Покрывающий индекс позволит получить все необходимые данные из индекса без обращения к таблице",
+        "implementation": "CREATE INDEX idx_users_active_data ON users(is_active, id, name);",
+        "estimated_speedup": 30.0
+      },
+      {
+        "type": "index",
+        "priority": "medium",
+        "title": "Покрывающий индекс для orders",
+        "description": "Создание составного индекса для таблицы orders",
+        "potential_improvement": "Позволит получить все необходимые данные для агрегации из индекса",
+        "implementation": "CREATE INDEX idx_orders_user_data ON orders(user_id, id, total_amount);",
+        "estimated_speedup": 35.0
+      },
+      {
+        "type": "maintenance",
+        "priority": "low",
+        "title": "Обновление статистики",
+        "description": "Обновление статистики таблиц",
+        "potential_improvement": "Улучшит точность планировщика запросов, что приведет к более оптимальным планам выполнения",
+        "implementation": "ANALYZE users; ANALYZE orders;",
+        "estimated_speedup": 15.0
+      },
+      {
+        "type": "configuration",
+        "priority": "low",
+        "title": "Настройка памяти для сортировки",
+        "description": "Увеличение work_mem",
+        "potential_improvement": "Ускорит операции сортировки и хеширования, уменьшив использование диска",
+        "implementation": "SET work_mem = '8MB'; или установить в postgresql.conf",
+        "estimated_speedup": 20.0
+      }
+    ],
+    "warnings": [
+      "Отсутствие индексов приводит к полному сканированию таблиц (Seq Scan) для обеих таблиц",
+      "Потенциальная проблема с оценкой количества строк: план показывает 85 строк для users и 690 для orders, но фактическое количество строк в результате - 0",
+      "Время выполнения 0 мс может быть неточным или указывать на кешированные данные",
+      "Hash Join с большим количеством строк может потреблять значительные ресурсы памяти",
+      "Операция сортировки (Sort) может быть ресурсоемкой при большом количестве результатов"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "7ed92a5da0307d4e2c1f9db6e4c460eb": {
+    "query": "SELECT * FROM users WHERE id IN (SELECT user_id FROM orders WHERE total_amount > (SELECT AVG(total_amount) FROM orders))",
+    "rewritten_query": "SELECT DISTINCT u.* FROM users u JOIN orders o ON u.id = o.user_id WHERE o.total_amount > (SELECT AVG(total_amount) FROM orders);",
+    "resource_metrics": {
+      "cpu_usage": 75.0,
+      "memory_usage": 15.0,
+      "io_operations": 3,
+      "disk_reads": 3,
+      "disk_writes": 0,
+      "disk_io": 3.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс для фильтрации по сумме заказа",
+        "description": "Создание индекса на поле orders.total_amount",
+        "potential_improvement": "Ускорит вычисление среднего значения и фильтрацию заказов с суммой выше средней",
+        "implementation": "CREATE INDEX idx_orders_total_amount ON orders(total_amount);",
+        "estimated_speedup": 40.0
+      },
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс для соединения с пользователями",
+        "description": "Создание индекса на поле orders.user_id",
+        "potential_improvement": "Значительно ускорит операцию соединения с таблицей users",
+        "implementation": "CREATE INDEX idx_orders_user_id ON orders(user_id);",
+        "estimated_speedup": 50.0
+      },
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Составной индекс для оптимизации подзапроса",
+        "description": "Создание составного индекса на поля orders(total_amount, user_id)",
+        "potential_improvement": "Позволит эффективно выполнять фильтрацию по сумме и получать user_id в одном сканировании индекса",
+        "implementation": "CREATE INDEX idx_orders_amount_user ON orders(total_amount, user_id);",
+        "estimated_speedup": 60.0
+      },
+      {
+        "type": "query_rewrite",
+        "priority": "medium",
+        "title": "Замена подзапроса на JOIN",
+        "description": "Переписать запрос с использованием JOIN вместо подзапроса IN",
+        "potential_improvement": "JOIN обычно работает эффективнее, чем подзапросы с IN, особенно при больших объемах данных",
+        "implementation": "SELECT DISTINCT u.* FROM users u JOIN orders o ON u.id = o.user_id WHERE o.total_amount > (SELECT AVG(total_amount) FROM orders);",
+        "estimated_speedup": 30.0
+      },
+      {
+        "type": "query_rewrite",
+        "priority": "medium",
+        "title": "Использование CTE для среднего значения",
+        "description": "Использование CTE для вычисления среднего значения",
+        "potential_improvement": "Улучшит читаемость и потенциально производительность, особенно если среднее значение используется несколько раз",
+        "implementation": "WITH avg_order AS (SELECT AVG(total_amount) as avg_amount FROM orders) SELECT DISTINCT u.* FROM users u JOIN orders o ON u.id = o.user_id CROSS JOIN avg_order a WHERE o.total_amount > a.avg_amount;",
+        "estimated_speedup": 20.0
+      },
+      {
+        "type": "query_optimization",
+        "priority": "low",
+        "title": "Отказ от SELECT *",
+        "description": "Явное указание необходимых полей вместо SELECT *",
+        "potential_improvement": "Уменьшит объем передаваемых данных и может ускорить выполнение запроса",
+        "implementation": "SELECT u.id, u.name, u.email FROM users u WHERE u.id IN (SELECT o.user_id FROM orders o WHERE o.total_amount > (SELECT AVG(total_amount) FROM orders));",
+        "estimated_speedup": 15.0
+      }
+    ],
+    "warnings": [
+      "Множественные полные сканирования таблицы orders (690 и 230 строк) вместо использования индексов",
+      "Отсутствие индексов приводит к неэффективным операциям Seq Scan",
+      "Конструкция IN с подзапросом может быть неэффективной при большом количестве возвращаемых строк",
+      "Использование SELECT * может возвращать избыточные данные",
+      "Потенциальная проблема с оценкой количества строк: план показывает 85 строк для результата, но фактическое количество строк - 0"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "d42571254bf65fc9cb9369fe3e712e5c": {
+    "query": "SELECT name, total_amount, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY total_amount DESC) as rank FROM orders o JOIN users u ON o.user_id = u.id",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 15.0,
+      "memory_usage": 0.5,
+      "io_operations": 2,
+      "disk_reads": 2,
+      "disk_writes": 0,
+      "disk_io": 2.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 690,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 95.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "Индексация",
+        "priority": "high",
+        "title": "Добавить индекс на orders.user_id",
+        "description": "План показывает последовательное сканирование таблицы orders. Добавление индекса на поле user_id ускорит операцию JOIN и снизит нагрузку на CPU.",
+        "potential_improvement": "Ускорение выполнения запроса на 50-70% при больших объемах данных",
+        "implementation": "CREATE INDEX idx_orders_user_id ON orders(user_id);",
+        "estimated_speedup": 60.0
+      },
+      {
+        "type": "Индексация",
+        "priority": "high",
+        "title": "Добавить индекс на orders.total_amount",
+        "description": "Оконная функция ROW_NUMBER() требует сортировки по total_amount. Индекс на это поле ускорит операцию сортировки и снизит использование памяти.",
+        "potential_improvement": "Ускорение сортировки на 40-60%",
+        "implementation": "CREATE INDEX idx_orders_total_amount ON orders(total_amount DESC);",
+        "estimated_speedup": 50.0
+      },
+      {
+        "type": "Индексация",
+        "priority": "medium",
+        "title": "Добавить составной индекс (user_id, total_amount) в orders",
+        "description": "Для оконной функции с PARTITION BY user_id и ORDER BY total_amount составной индекс будет более эффективным, чем отдельные индексы.",
+        "potential_improvement": "Ускорение выполнения оконной агрегации на 30-50%",
+        "implementation": "CREATE INDEX idx_orders_user_total ON orders(user_id, total_amount DESC);",
+        "estimated_speedup": 40.0
+      },
+      {
+        "type": "Настройка",
+        "priority": "low",
+        "title": "Обновить статистику таблиц",
+        "description": "План показывает 690 строк в orders, но 0 строк в результате. Возможно, статистика устарела. Обновление статистики поможет оптимизатору выбрать лучший план.",
+        "potential_improvement": "Улучшение оценки оптимизатора",
+        "implementation": "ANALYZE orders; ANALYZE users;",
+        "estimated_speedup": 5.0
+      }
+    ],
+    "warnings": [
+      "Полное сканирование таблиц orders и users вместо использования индексов",
+      "Низкое использование индексов (0%) в текущем плане",
+      "Время выполнения 0 мс может быть неточным при малых объемах данных"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "681f2ee0c3bad77a78daeaac6caefaef": {
+    "query": "SELECT * FROM users WHERE name LIKE '%John%'",
+    "rewritten_query": "SELECT * FROM users WHERE name ILIKE 'John'",
+    "resource_metrics": {
+      "cpu_usage": 5.0,
+      "memory_usage": 0.5,
+      "io_operations": 1,
+      "disk_reads": 1,
+      "disk_writes": 0,
+      "disk_io": 1.0,
+      "network_io": 0.0,
+      "execution_time": 0.001,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.95,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "high",
+        "priority": "high",
+        "title": "Создать частичный индекс для поиска по подстроке",
+        "description": "Создайте частичный индекс на поле name для значений, содержащих 'John', чтобы ускорить поиск подстроки. Это особенно эффективно, если таких значений немного.",
+        "potential_improvement": "Ускорение на 90-99%",
+        "implementation": "CREATE INDEX idx_users_name_partial ON users (name)\nWHERE name ILIKE '%John%';",
+        "estimated_speedup": 95.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Использовать регистронезависимый поиск",
+        "description": "Замените LIKE на ILIKE для регистронезависимого поиска, если регистр не важен. Это позволяет использовать индексы с оператором ~*",
+        "potential_improvement": "Ускорение на 50-70%",
+        "implementation": "SELECT * FROM users WHERE name ILIKE '%John%;",
+        "estimated_speedup": 60.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Создать GIN/GiST индекс для полнотекстового поиска",
+        "description": "Для частых поисков по подстрокам в любом месте строки используйте GIN или GiST индексы с оператором @@. Это особенно эффективно для больших таблиц.",
+        "potential_improvement": "Ускорение на 70-90%",
+        "implementation": "CREATE INDEX idx_users_name_gin ON users USING GIN (to_tsvector('english', name));\n\nSELECT * FROM users\nWHERE to_tsvector('english', name)\n@@ to_tsquery('english', 'John');",
+        "estimated_speedup": 80.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Оптимизировать структуру данных",
+        "description": "Если поиск по подстроке в любом месте строки выполняется часто, рассмотрите возможность хранения нормализованных данных в отдельной таблице или использования полнотекстового поиска.",
+        "potential_improvement": "Ускорение на 30-50%",
+        "implementation": "Создайте отдельную таблицу для нормализованных имен и используйте полнотекстовый поиск или внешние инструменты поиска (например, Elasticsearch).",
+        "estimated_speedup": 40.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Использовать LIMIT при необходимости",
+        "description": "Если вам нужны только первые несколько результатов, добавьте LIMIT для уменьшения объема обработки.",
+        "potential_improvement": "Ускорение на 20-40%",
+        "implementation": "SELECT * FROM users WHERE name LIKE '%John%' LIMIT 10;",
+        "estimated_speedup": 30.0
+      }
+    ],
+    "warnings": [
+      "Полное сканирование таблицы (Seq Scan), что неэффективно для больших таблиц",
+      "LIKE '%...%' не может использовать обычные B-tree индексы эффективно",
+      "SELECT * может возвращать избыточные данные. Рекомендуется явно указывать необходимые столбцы",
+      "Время выполнения 0 мс может быть неточным для очень быстрых запросов или пустых результатов",
+      "Потенциальная проблема с оценкой количества строк: план показывает 1 строку, но фактически возвращено 0 строк"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "31064b7ca0466817ff0951636769e067": {
+    "query": "SELECT u.name, o.total_amount, oi.product_name, oi.quantity FROM users u JOIN orders o ON u.id = o.user_id JOIN order_items oi ON o.id = oi.order_id WHERE o.status = 'completed'",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 15.0,
+      "memory_usage": 1.5,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 70.0,
+      "cache_hit_ratio": 95.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс на orders.user_id",
+        "description": "Создание индекса на поле orders.user_id: Добавить индекс на поле user_id таблицы orders для оптимизации JOIN операции с таблицей users",
+        "potential_improvement": "Ускорит выполнение JOIN между orders и users, особенно при увеличении объема данных",
+        "implementation": "CREATE INDEX idx_orders_user_id ON orders(user_id);",
+        "estimated_speedup": 30.0
+      },
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Составной индекс на orders.status и user_id",
+        "description": "Создание составного индекса на orders.status и orders.user_id: Такой индекс может ускорить фильтрацию по статусу и JOIN с users",
+        "potential_improvement": "Сократит количество строк, которые нужно сканировать и соединять, особенно при фильтрации по статусу 'completed'",
+        "implementation": "CREATE INDEX idx_orders_status_user_id ON orders(status, user_id);",
+        "estimated_speedup": 40.0
+      },
+      {
+        "type": "db_configuration",
+        "priority": "medium",
+        "title": "Обновление статистики таблиц",
+        "description": "Проверка актуальности статистики: В таблице order_items ожидается 170 строк, но в запросе не возвращается ни одной. Возможно, статистика устарела или данные не соответствуют условиям",
+        "potential_improvement": "Обновит статистику таблиц, что поможет оптимизатору генерировать более точные планы выполнения запросов",
+        "implementation": "ANALYZE orders; ANALYZE order_items; ANALYZE users;",
+        "estimated_speedup": 0.0
+      },
+      {
+        "type": "query_rewrite",
+        "priority": "low",
+        "title": "Добавление LIMIT для снижения нагрузки",
+        "description": "Оптимизация запроса: Если ожидается, что количество заказов с 'completed' статусом невелико, можно использовать LIMIT для тестирования и уменьшения нагрузки",
+        "potential_improvement": "Снизит нагрузку на систему при тестировании или разовых запросах",
+        "implementation": "SELECT u.name, o.total_amount, oi.product_name, oi.quantity FROM users u JOIN orders o ON u.id = o.user_id JOIN order_items oi ON o.id = oi.order_id WHERE o.status = 'completed' LIMIT 100;",
+        "estimated_speedup": 10.0
+      }
+    ],
+    "warnings": [
+      "Внимание: В запросе не возвращается ни одной строки, но ожидается 1 строка. Возможно, данные не соответствуют условиям WHERE или статистика устарела",
+      "Предупреждение: В таблице order_items ожидается 170 строк, но в запросе не возвращается ни одной. Это может указывать на проблему с данными или условиями фильтрации",
+      "Предупреждение: Использование Nested Loop и Hash Join может быть неэффективным при больших объемах данных. Рассмотрите возможность оптимизации структуры индексов"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "fa39853f2b86d5db41737f21c9c8a059": {
+    "query": "SELECT user_id, COUNT(*) as order_count, AVG(total_amount) as avg_amount FROM orders GROUP BY user_id HAVING COUNT(*) > 1",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 5.0,
+      "memory_usage": 0.5,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 690,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.95,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс для GROUP BY",
+        "description": "Создание индекса на поле user_id таблицы orders для ускорения группировки и агрегации",
+        "potential_improvement": "Индекс на поле user_id ускорит группировку и агрегацию, особенно если таблица orders содержит много записей. Поскольку запрос использует GROUP BY user_id, индекс позволит БД быстрее собирать данные по каждому пользователю, сократив время выполнения агрегации.",
+        "implementation": "CREATE INDEX idx_orders_user_id ON orders(user_id);",
+        "estimated_speedup": 50.0
+      }
+    ],
+    "warnings": [
+      "План выполнения показывает, что таблица orders была полностью отсканирована (Seq Scan), что может быть неэффективно при увеличении объема данных.",
+      "Отсутствие индекса на поле user_id приводит к полному сканированию таблицы, что увеличивает время выполнения агрегации.",
+      "Заявленное количество строк (690) в таблице orders может быть неточным из-за устаревшей статистики. Рекомендуется обновить статистику с помощью ANALYZE orders;",
+      "Запрос возвращает 67 строк согласно оценке, но фактически вернул 0 строк. Это может указывать на несоответствие данных и статистики, либо на то, что условие HAVING COUNT(*) > 1 не выполняется для большинства пользователей."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "0fbb745cea2df6e9927a61aa5d716458": {
+    "query": "SELECT * FROM orders WHERE created_at >= '2024-01-01' AND created_at < '2025-01-01'",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 0.0,
+      "memory_usage": 0.0,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "high",
+        "priority": "high",
+        "title": "Создать индекс на поле created_at",
+        "description": "Поскольку запрос фильтрует по дате создания, создание индекса на поле created_at значительно ускорит выполнение этого запроса. Поскольку используется диапазон дат, индекс позволит быстро локализовать нужные строки.",
+        "potential_improvement": "Ускорение выполнения запроса в 10-100 раз в зависимости от размера таблицы",
+        "implementation": "CREATE INDEX idx_orders_created_at ON orders(created_at);",
+        "estimated_speedup": 50.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Проверить статистику таблицы",
+        "description": "План показывает 3 строки, но не указывает размер таблицы. Возможно, статистика устарела. Обновление статистики поможет оптимизатору лучше оценить количество строк и выбрать более эффективный план выполнения.",
+        "potential_improvement": "Улучшение оценки количества строк и более точное планирование запросов",
+        "implementation": "ANALYZE orders;",
+        "estimated_speedup": 10.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Рассмотреть возможность использования покрывающего индекса",
+        "description": "Если запрос часто используется, можно создать покрывающий индекс, включающий не только created_at, но и другие часто запрашиваемые поля. Это позволит избежать чтения данных из основной таблицы.",
+        "potential_improvement": "Ускорение выполнения запроса за счет избежания чтения основной таблицы",
+        "implementation": "CREATE INDEX idx_orders_created_at_covering ON orders(created_at) INCLUDE (id, customer_id, total_amount);",
+        "estimated_speedup": 30.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Рассмотреть возможность использования частичного индекса",
+        "description": "Если запрос часто фильтрует по определенному диапазону дат, можно создать частичный индекс только для этих данных. Это сократит размер индекса и ускорит его использование.",
+        "potential_improvement": "Уменьшение размера индекса и ускорение его использования",
+        "implementation": "CREATE INDEX idx_orders_created_at_partial ON orders(created_at WHERE created_at >= '2024-01-01');",
+        "estimated_speedup": 15.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Рассмотреть возможность использования партиционирования",
+        "description": "Если таблица orders содержит миллионы строк, партиционирование по дате может значительно улучшить производительность запросов, фильтрующих по дате.",
+        "potential_improvement": "Ускорение выполнения запросов за счет ограничения области поиска",
+        "implementation": "CREATE TABLE orders_2024 PARTITION OF orders FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');",
+        "estimated_speedup": 20.0
+      }
+    ],
+    "warnings": [
+      "Поскольку используется Seq Scan, запрос может быть медленным при увеличении размера таблицы",
+      "План показывает 3 строки, но не указывает размер таблицы. Возможно, статистика устарела",
+      "SELECT * может возвращать избыточные данные. Рекомендуется явно указывать необходимые столбцы"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "1f557ff6399bd6dc31d31c449beb3ef1": {
+    "query": "SELECT u.name, o.total_amount FROM users u, orders o WHERE u.id = o.user_id AND o.status = 'completed'",
+    "rewritten_query": "SELECT u.name, o.total_amount FROM users u INNER JOIN orders o ON u.id = o.user_id WHERE o.status = 'completed'",
+    "resource_metrics": {
+      "cpu_usage": 5.0,
+      "memory_usage": 0.1,
+      "io_operations": 1,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 3,
+      "index_usage": 1.0,
+      "cache_hit_ratio": 0.95,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс на orders.user_id",
+        "description": "Добавьте индекс на поле orders.user_id для ускорения операции JOIN",
+        "potential_improvement": "Ускорит выполнение JOIN между users и orders, особенно если таблица orders большая",
+        "implementation": "CREATE INDEX idx_orders_user_id ON orders(user_id);",
+        "estimated_speedup": 50.0
+      }
+    ],
+    "warnings": [
+      "В запросе используется неявный JOIN (через запятую), что может привести к ошибкам и снижению читаемости. Рекомендуется использовать явный INNER JOIN",
+      "План выполнения показывает, что в таблице orders ожидается всего 3 строки, но это может быть неточное значение статистики. Рекомендуется обновить статистику с помощью ANALYZE orders;"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "4113a36139a272f23c73775b7d9ce2c1": {
+    "query": "SELECT u.name, (SELECT COUNT(*) FROM orders WHERE user_id = u.id) as order_count FROM users u WHERE u.is_active = true",
+    "rewritten_query": "SELECT u.name, COUNT(o.id) AS order_count\nFROM users u\nLEFT JOIN orders o ON u.id = o.user_id\nWHERE u.is_active = true\nGROUP BY u.id, u.name",
+    "resource_metrics": {
+      "cpu_usage": 15.0,
+      "memory_usage": 2.0,
+      "io_operations": 100,
+      "disk_reads": 50,
+      "disk_writes": 0,
+      "disk_io": 50.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 1.0,
+      "cache_hit_ratio": 95.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "high",
+        "priority": "high",
+        "title": "Создать индекс на поле users.is_active",
+        "description": "Добавление индекса на поле is_active таблицы users позволит ускорить фильтрацию активных пользователей, уменьшая количество строк, которые необходимо обрабатывать.",
+        "potential_improvement": "Ускорение выполнения запроса на 50-70%",
+        "implementation": "CREATE INDEX idx_users_is_active ON users (is_active);",
+        "estimated_speedup": 60.0
+      },
+      {
+        "type": "high",
+        "priority": "high",
+        "title": "Создать индекс на поле orders.user_id",
+        "description": "Индекс на поле user_id таблицы orders ускорит выполнение подзапроса, уменьшая количество строк, которые необходимо сканировать для подсчета заказов.",
+        "potential_improvement": "Ускорение выполнения запроса на 30-50%",
+        "implementation": "CREATE INDEX idx_orders_user_id ON orders (user_id);",
+        "estimated_speedup": 40.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Обновить статистику таблиц",
+        "description": "Устаревшая статистика может привести к неправильному выбору плана выполнения запроса. Обновление статистики поможет оптимизатору сделать более точные оценки.",
+        "potential_improvement": "Улучшение выбора плана выполнения запроса",
+        "implementation": "ANALYZE users; ANALYZE orders;",
+        "estimated_speedup": 10.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Использовать JOIN вместо подзапроса",
+        "description": "Замена подзапроса на LEFT JOIN с агрегацией может улучшить производительность, особенно при больших объемах данных.",
+        "potential_improvement": "Ускорение выполнения запроса на 10-20%",
+        "implementation": "SELECT u.name, COUNT(o.id)\nFROM users u\nLEFT JOIN orders o ON u.id = o.user_id\nWHERE u.is_active = true\nGROUP BY u.id, u.name",
+        "estimated_speedup": 15.0
+      }
+    ],
+    "warnings": [
+      "Потенциальная проблема с оценкой количества строк: план показывает 85 строк для users, но статистика указывает только 3 строки",
+      "Отсутствие индексов приводит к полному сканированию таблиц (Seq Scan)"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "1a81b29ffa4659b7b8b2910e629e118d": {
+    "query": "SELECT * FROM users ORDER BY created_at DESC",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 1.0,
+      "memory_usage": 0.01,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.001,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 100.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "high",
+        "priority": "high",
+        "title": "Создать индекс на поле created_at",
+        "description": "Для ускорения сортировки по полю created_at необходимо создать индекс. Поскольку запрос использует сортировку в порядке убывания, индекс должен быть создан с опцией DESC.",
+        "potential_improvement": "Ускорение выполнения запроса в 10-100 раз в зависимости от размера таблицы",
+        "implementation": "CREATE INDEX idx_users_created_at_desc ON users(created_at DESC);",
+        "estimated_speedup": 50.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Ограничить количество возвращаемых строк",
+        "description": "Запрос возвращает все строки таблицы, что может быть неэффективно при больших объемах данных. Добавление LIMIT уменьшит объем передаваемых данных и нагрузку на сервер.",
+        "potential_improvement": "Снижение нагрузки на сеть и ускорение выполнения при использовании LIMIT",
+        "implementation": "SELECT * FROM users ORDER BY created_at DESC LIMIT 100;",
+        "estimated_speedup": 20.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Использовать только необходимые столбцы",
+        "description": "SELECT * может возвращать избыточные данные. Явное указание необходимых столбцов уменьшит объем передаваемых данных.",
+        "potential_improvement": "Снижение объема передаваемых данных и нагрузки на сеть",
+        "implementation": "SELECT id, name, created_at FROM users ORDER BY created_at DESC;",
+        "estimated_speedup": 10.0
+      }
+    ],
+    "warnings": [
+      "Потенциальная проблема с оценкой количества строк: план показывает 170 строк, но время выполнения 0 мс и количество обработанных строк 0 кажутся несоответствующими. Возможно устаревшая статистика или очень маленький объем данных.",
+      "SELECT * может возвращать избыточные данные. Рекомендуется явно указывать необходимые столбцы.",
+      "Отсутствие индекса на поле created_at приводит к полной сортировке таблицы, что может быть ресурсоемким при больших объемах данных."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "85fc1a2e2d0287e573a842c5fdcc4da2": {
+    "query": "SELECT * FROM users WHERE UPPER(name) = 'JOHN DOE'",
+    "rewritten_query": "SELECT * FROM users WHERE name = 'JOHN DOE'",
+    "resource_metrics": {
+      "cpu_usage": 5.0,
+      "memory_usage": 0.05,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.95,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс для функции UPPER(name)",
+        "description": "Создание индекса на поле name с использованием функции UPPER: Добавьте индекс на функцию UPPER(name), чтобы ускорить фильтрацию по этому условию. Поскольку вы используете функцию UPPER, обычный индекс на поле name не будет использоваться.",
+        "potential_improvement": "После создания индекса, PostgreSQL сможет использовать его для выполнения индексного сканирования (Index Scan), что значительно сократит время выполнения запроса, особенно при увеличении размера таблицы.",
+        "implementation": "CREATE INDEX idx_users_upper_name ON users (UPPER(name));",
+        "estimated_speedup": 90.0
+      }
+    ],
+    "warnings": [
+      "Потенциальная проблема с использованием функции UPPER в условии WHERE: Это приводит к невозможности использования обычного индекса на поле name. Рекомендуется использовать функциональный индекс.",
+      "Предупреждение: Использование SELECT * может возвращать избыточные данные. Рекомендуется явно указывать необходимые столбцы для уменьшения объема передаваемых данных.",
+      "Предупреждение: Последовательное сканирование (Seq Scan) таблицы users. При увеличении размера таблицы это может стать узлом бутылки."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "46d446f2fff5f9b6b8885d118b2e5f3b": {
+    "query": "SELECT name FROM users WHERE id IN (SELECT user_id FROM orders WHERE total_amount > (SELECT AVG(total_amount) FROM orders WHERE status = 'completed'))",
+    "rewritten_query": "SELECT u.name FROM users u JOIN (SELECT user_id FROM orders WHERE total_amount > (SELECT AVG(total_amount FROM orders WHERE status = 'completed'))) AS subquery ON u.id = subquery.user_id",
+    "resource_metrics": {
+      "cpu_usage": 15.0,
+      "memory_usage": 2.0,
+      "io_operations": 3,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 1.0,
+      "cache_hit_ratio": 95.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "high",
+        "priority": "high",
+        "title": "Создать индекс на orders.total_amount",
+        "description": "Создание индекса на поле total_amount таблицы orders ускорит фильтрацию по этому полю в подзапросе. Это особенно важно, так как поле используется в условии сравнения с агрегатной функцией AVG().",
+        "potential_improvement": "Ускорение выполнения подзапроса на 50-70%",
+        "implementation": "CREATE INDEX idx_orders_total_amount ON orders(total_amount);",
+        "estimated_speedup": 60.0
+      },
+      {
+        "type": "high",
+        "priority": "high",
+        "title": "Создать индекс на orders.user_id",
+        "description": "Создание индекса на поле user_id таблицы orders ускорит операцию JOIN с таблицей users. Поскольку используется Hash Join, индекс поможет сократить количество обрабатываемых строк.",
+        "potential_improvement": "Ускорение JOIN операции на 40-60%",
+        "implementation": "CREATE INDEX idx_orders_user_id ON orders(user_id);",
+        "estimated_speedup": 50.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Оптимизировать подзапрос с использованием CTE",
+        "description": "Использование CTE (Common Table Expression) вместо вложенного подзапроса может улучшить читаемость запроса и потенциально помочь оптимизатору сгенерировать более эффективный план выполнения.",
+        "potential_improvement": "Улучшение читаемости и потенциальное ускорение на 10-20%",
+        "implementation": "SELECT u.name FROM users u JOIN (SELECT user_id FROM orders WHERE total_amount > (SELECT AVG(total_amount) FROM orders WHERE status = 'completed')) AS subquery ON u.id = subquery.user_id",
+        "estimated_speedup": 15.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Обновить статистику таблиц",
+        "description": "Устаревшая статистика может привести к неправильным оценкам количества строк и выбору неоптимального плана выполнения. Обновление статистики поможет оптимизатору сделать более точные оценки.",
+        "potential_improvement": "Улучшение выбора плана выполнения",
+        "implementation": "ANALYZE users; ANALYZE orders;",
+        "estimated_speedup": 5.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Рассмотреть использование материализованных представлений",
+        "description": "Если запрос выполняется часто и данные не меняются слишком часто, можно рассмотреть создание материализованного представления для хранения результатов агрегации.",
+        "potential_improvement": "Ускорение выполнения запроса при повторных запусках",
+        "implementation": "CREATE MATERIALIZED VIEW avg_order_amount AS SELECT AVG(total_amount) FROM orders WHERE status = 'completed';",
+        "estimated_speedup": 20.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Проверить настройки параметров БД",
+        "description": "Проверить настройки параметров, таких как work_mem и shared_buffers, чтобы убедиться, что они оптимальны для текущей нагрузки.",
+        "potential_improvement": "Улучшение общей производительности БД",
+        "implementation": "Проверить и при необходимости изменить параметры в postgresql.conf",
+        "estimated_speedup": 10.0
+      }
+    ],
+    "warnings": [
+      "Полное сканирование таблицы orders в подзапросе может быть ресурсоемким при больших объемах данных",
+      "Отсутствие индекса на orders.total_amount приводит к полному сканированию таблицы при вычислении среднего значения",
+      "Отсутствие индекса на orders.user_id приводит к полному сканированию таблицы при выполнении JOIN",
+      "Оценка количества строк в плане выполнения (85 строк для users, 170 строк для orders) не соответствует заявленным 0 строкам в результате",
+      "Использование Hash Join может быть неэффективным при больших объемах данных из-за потребления памяти",
+      "Потенциальная проблема с устаревшей статистикой таблиц, что может привести к неправильным оценкам и выбору неоптимального плана выполнения"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "d4e2ab2e7180e2af7530148aef1ee325": {
+    "query": "SELECT * FROM users WHERE name LIKE '%John%' OR email LIKE '%john%'",
+    "rewritten_query": "SELECT * FROM users WHERE name ILIKE '%John%' OR email ILIKE '%john%'",
+    "resource_metrics": {
+      "cpu_usage": 5.0,
+      "memory_usage": 0.5,
+      "io_operations": 1,
+      "disk_reads": 1,
+      "disk_writes": 0,
+      "disk_io": 1.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "high",
+        "priority": "high",
+        "title": "Создание частичных индексов для полнотекстового поиска",
+        "description": "Для запросов с LIKE '%...%' создайте частичные индексы с использованием оператора ILIKE и функции lower() для улучшения производительности. Рассмотрите использование расширения pg_trgm для индексов на основе триграмм.",
+        "potential_improvement": "Ускорение выполнения запроса в 10-100 раз при больших объемах данных",
+        "implementation": "CREATE INDEX idx_users_name_trgm ON users USING gin (name gin_trgm_ops);\nCREATE INDEX idx_users_email_trgm ON users USING gin (email gin_trgm_ops);\nCREATE EXTENSION IF NOT EXISTS pg_trgm;",
+        "estimated_speedup": 50.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Оптимизация запроса с использованием конкретных полей",
+        "description": "Вместо использования SELECT * укажите конкретные поля, которые вам нужны. Это уменьшит объем передаваемых данных и нагрузку на память.",
+        "potential_improvement": "Снижение потребления памяти и ускорение передачи данных",
+        "implementation": "SELECT id, name, email FROM users WHERE name ILIKE '%John%' OR email ILIKE '%john%'",
+        "estimated_speedup": 15.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Обновление статистики таблицы",
+        "description": "Обновите статистику таблицы users, чтобы улучшить оценку планировщика запросов.",
+        "potential_improvement": "Более точное планирование запросов и потенциальное улучшение производительности",
+        "implementation": "ANALYZE users;",
+        "estimated_speedup": 5.0
+      }
+    ],
+    "warnings": [
+      "Потенциальная проблема с производительностью: Использование оператора LIKE '%...%' приводит к полному сканированию таблицы (Seq Scan), что может быть очень медленным при больших объемах данных",
+      "Предупреждение: SELECT * может возвращать избыточные данные. Рекомендуется явно указывать необходимые столбцы",
+      "Предупреждение: Отсутствие индексов для условий WHERE с оператором LIKE '%...%' приводит к полному сканированию таблицы",
+      "Предупреждение: Убедитесь, что статистика таблицы актуальна для корректной оценки планировщика запросов"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "267bc4e9a938925d4775ab7e06b1490c": {
+    "query": "SELECT u.name, o.total_amount FROM users u CROSS JOIN orders o WHERE u.id = o.user_id",
+    "rewritten_query": "SELECT u.name, o.total_amount FROM users u INNER JOIN orders o ON u.id = o.user_id;",
+    "resource_metrics": {
+      "cpu_usage": 5.0,
+      "memory_usage": 0.1,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.95,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "query_rewrite",
+        "priority": "high",
+        "title": "Использование INNER JOIN вместо CROSS JOIN",
+        "description": "Замените CROSS JOIN на INNER JOIN, так как в данном случае используется условие WHERE, которое фактически реализует INNER JOIN. CROSS JOIN без условия — это декартово произведение, что может быть очень ресурсоемким.",
+        "potential_improvement": "Устранение потенциального декартова произведения и улучшение читаемости запроса.",
+        "implementation": "Измените запрос на INNER JOIN вместо CROSS JOIN, чтобы избежать лишних операций декартова произведения.",
+        "estimated_speedup": 100.0
+      },
+      {
+        "type": "index",
+        "priority": "medium",
+        "title": "Индекс на users.id",
+        "description": "Добавьте индекс на поле `users.id`, если его нет. Это поле используется в условии JOIN, и наличие индекса может ускорить операцию хэширования.",
+        "potential_improvement": "Ускорение операции хэширования для таблицы `users`.",
+        "implementation": "CREATE INDEX idx_users_id ON users(id);",
+        "estimated_speedup": 30.0
+      },
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс на orders.user_id",
+        "description": "Добавьте индекс на поле `orders.user_id`, если его нет. Это поле используется в условии JOIN, и наличие индекса может ускорить доступ к данным.",
+        "potential_improvement": "Ускорение операции хэш-джоин и уменьшение количества строк, обрабатываемых в хэше.",
+        "implementation": "CREATE INDEX idx_orders_user_id ON orders(user_id);",
+        "estimated_speedup": 40.0
+      },
+      {
+        "type": "db_configuration",
+        "priority": "medium",
+        "title": "Обновление статистики таблиц",
+        "description": "Обновите статистику таблиц `users` и `orders`, чтобы убедиться, что оценки количества строк и стоимости в плане выполнения корректны.",
+        "potential_improvement": "Улучшение оценки планировщика, что может привести к более оптимальному выбору плана выполнения.",
+        "implementation": "ANALYZE users; ANALYZE orders;",
+        "estimated_speedup": 10.0
+      }
+    ],
+    "warnings": [
+      "Использование CROSS JOIN без явного условия JOIN может привести к декартову произведению, что является ресурсоемкой операцией. В данном случае используется условие WHERE, что делает CROSS JOIN избыточным.",
+      "Отсутствие индекса на `orders.user_id` может привести к полному сканированию таблицы `orders`, что снижает производительность при больших объемах данных.",
+      "Отсутствие индекса на `users.id` может замедлить операцию хэширования, особенно при увеличении размера таблицы.",
+      "План выполнения показывает, что запрос вернул 0 строк, но оценка количества строк в узлах плана указывает на 690 и 170 строк. Это может говорить об устаревшей статистике или о том, что условие WHERE слишком ограничено."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "8d84e548a817ddce7f2560480dee7ea2": {
+    "query": "UPDATE users SET last_login = NOW() WHERE email = 'john@example.com'",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 0.0,
+      "memory_usage": 0.0,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 1,
+      "disk_io": 1.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 1.0,
+      "cache_hit_ratio": 100.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "high",
+        "priority": "high",
+        "title": "Проверка актуальности статистики",
+        "description": "Показатель 'количество строк: 0', но стоимость выполнения запроса 8.16 указывает на возможную неактуальность статистики таблицы. Обновите статистику с помощью ANALYZE users;",
+        "potential_improvement": "Улучшение оценки оптимизатора, более точное планирование запросов",
+        "implementation": "ANALYZE users;",
+        "estimated_speedup": 10.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Проверка покрытия индекса",
+        "description": "Индекс idx_users_email используется для поиска по email, но для UPDATE операции необходимо обновить поле last_login. Убедитесь, что индекс не является чрезмерно широким и не содержит ненужных полей",
+        "potential_improvement": "Снижение размера индекса и ускорение операций вставки/обновления",
+        "implementation": "Если индекс содержит ненужные поля, пересоздайте его без них: DROP INDEX idx_users_email; CREATE INDEX idx_users_email ON users(email);",
+        "estimated_speedup": 5.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Проверка фрагментации таблицы",
+        "description": "После множества обновлений возможно появление фрагментации. Проверьте и при необходимости выполните VACUUM (FULL).",
+        "potential_improvement": "Улучшение производительности операций вставки/обновления",
+        "implementation": "VACUUM (FULL) users;",
+        "estimated_speedup": 5.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Мониторинг блокировок",
+        "description": "UPDATE операция может блокировать строку или таблицу в зависимости от настроек. Убедитесь, что нет длительных блокировок.",
+        "potential_improvement": "Снижение вероятности конфликтов блокировок",
+        "implementation": "Используйте pg_locks для мониторинга блокировок: SELECT * FROM pg_locks WHERE relation = 'users'::regclass;",
+        "estimated_speedup": 2.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Проверка размера строк",
+        "description": "Ширина строки (449 байт) указывает на наличие большого количества полей. Рассмотрите возможность нормализации данных или использования частичных индексов.",
+        "potential_improvement": "Снижение объема данных, обрабатываемых при обновлении",
+        "implementation": "Разделите таблицу на нормализованные таблицы или создайте частичные индексы",
+        "estimated_speedup": 3.0
+      }
+    ],
+    "warnings": [
+      "Внимание: Обновление статистики таблицы users может быть необходимо, так как количество обработанных строк равно 0, но стоимость выполнения запроса 8.16",
+      "Предупреждение: Ширина строки (449 байт), возможно, указывает на неоптимальную структуру таблицы",
+      "Предупреждение: Обратите внимание на возможные блокировки при выполнении UPDATE операции, особенно в условиях высокой конкуренции"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "baf1237b006aaccdba0abdfd24a448fb": {
+    "query": "UPDATE orders SET status = 'completed' FROM users u WHERE orders.user_id = u.id AND u.email = 'john@example.com'",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 0.0,
+      "memory_usage": 0.0,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Создать индекс на поле users.email",
+        "description": "Для ускорения фильтрации пользователей по email в подзапросе, рекомендуется создать индекс на поле users.email. Это позволит избежать полного сканирования таблицы users.",
+        "potential_improvement": "Значительное ускорение выполнения запроса, особенно при больших объемах данных в таблице users.",
+        "implementation": "CREATE INDEX idx_users_email ON users(email);",
+        "estimated_speedup": 90.0
+      },
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Создать индекс на поле orders.user_id",
+        "description": "Для ускорения соединения таблиц orders и users по полю user_id, рекомендуется создать индекс на поле orders.user_id. Это ускорит выполнение операции UPDATE.",
+        "potential_improvement": "Значительное ускорение выполнения операции UPDATE, особенно при больших объемах данных в таблице orders.",
+        "implementation": "CREATE INDEX idx_orders_user_id ON orders(user_id);",
+        "estimated_speedup": 80.0
+      },
+      {
+        "type": "configuration",
+        "priority": "medium",
+        "title": "Обновить статистику таблиц",
+        "description": "План выполнения указывает на возможное несоответствие между оценкой количества строк и реальными данными. Рекомендуется обновить статистику таблиц для более точного планирования запросов.",
+        "potential_improvement": "Улучшение точности оценки планировщика, что может привести к более оптимальному выбору плана выполнения.",
+        "implementation": "ANALYZE users; ANALYZE orders;",
+        "estimated_speedup": 20.0
+      },
+      {
+        "type": "query_rewrite",
+        "priority": "low",
+        "title": "Использовать явный JOIN вместо FROM в UPDATE",
+        "description": "Хотя текущий синтаксис корректен, использование явного JOIN может улучшить читаемость запроса и иногда помочь оптимизатору сгенерировать более эффективный план выполнения.",
+        "potential_improvement": "Минимальное улучшение читаемости и потенциальное улучшение производительности при определенных конфигурациях.",
+        "implementation": "UPDATE orders SET status = 'completed'\nFROM (SELECT id FROM users WHERE email = 'john@example.com') AS u\nWHERE orders.user_id = u.id;",
+        "estimated_speedup": 5.0
+      }
+    ],
+    "warnings": [
+      "Потенциальная проблема с оценкой количества строк: план показывает 1 строку, но количество обновленных строк равно 0. Это может указывать на несоответствие данных или устаревшую статистику.",
+      "Внимание: Обновление статистики таблиц может временно повлиять на производительность, особенно для больших таблиц.",
+      "Предупреждение: Операция UPDATE может блокировать строки в таблице orders, что может повлиять на конкурентность при высокой нагрузке.",
+      "Внимание: Если в таблице users нет записей с email 'john@example.com', запрос не обновит ни одну строку, что может быть ожидаемым поведением или ошибкой в зависимости от контекста."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "64705fe808a15191d27bbb5aa12637aa": {
+    "query": "UPDATE users SET is_active = false WHERE id IN (SELECT user_id FROM orders WHERE total_amount > 1000)",
+    "rewritten_query": "UPDATE users SET is_active = false FROM (SELECT DISTINCT user_id FROM orders WHERE total_amount > 1000...) AS subquery WHERE users.id = subquery.user_id",
+    "resource_metrics": {
+      "cpu_usage": 5.0,
+      "memory_usage": 0.5,
+      "io_operations": 170,
+      "disk_reads": 170,
+      "disk_writes": 170,
+      "disk_io": 340.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "high",
+        "priority": "high",
+        "title": "Создать индекс на orders.user_id и orders.total_amount",
+        "description": "Создание составного индекса на (user_id, total_amount), а также отдельного индекса на total_amount поможет ускорить выборку нужных записей из таблицы orders. Это снизит количество строк, которые нужно сканировать, и ускорит выполнение подзапроса.",
+        "potential_improvement": "Ускорение выполнения подзапроса на 80-90%",
+        "implementation": "CREATE INDEX idx_orders_user_total ON orders (user_id, total_amount);\nCREATE INDEX idx_orders_total_amount ON orders (total_amount);",
+        "estimated_speedup": 85.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Использовать CTE вместо подзапроса",
+        "description": "Замена подзапроса в операторе IN на CTE (Common Table Expression), особенно если результат подзапроса используется несколько раз, может улучшить читаемость и производительность запроса.",
+        "potential_improvement": "Улучшение читаемости и потенциальное ускорение на 10-20%",
+        "implementation": "WITH active_users AS (SELECT DISTINCT user_id FROM orders WHERE total_amount > 1000...)\nUPDATE users SET is_active = false FROM active_users WHERE users.id = active_users.user_id;",
+        "estimated_speedup": 15.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Добавить индекс на users.id",
+        "description": "Хотя id обычно является первичным ключом и уже имеет индекс, проверка его наличия и статуса может быть полезной. Убедитесь, что индекс на users.id актуален и не поврежден.",
+        "potential_improvement": "Минимальное улучшение, так как id обычно уже имеет индекс",
+        "implementation": "REINDEX INDEX users_pkey;",
+        "estimated_speedup": 5.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Обновить статистику таблиц",
+        "description": "Обновление статистики таблиц может помочь оптимизатору лучше оценить количество строк и выбрать более эффективный план выполнения.",
+        "potential_improvement": "Минимальное улучшение, но полезно для долгосрочной стабильности производительности",
+        "implementation": "ANALYZE users;\nANALYZE orders;",
+        "estimated_speedup": 5.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Использовать UPDATE FROM вместо IN",
+        "description": "Замена конструкции IN на JOIN через UPDATE FROM может улучшить производительность, особенно при работе с большими объемами данных.",
+        "potential_improvement": "Ускорение на 10-20%",
+        "implementation": "UPDATE users SET is_active = false FROM (SELECT DISTINCT user_id FROM orders WHERE total_amount > 1000...) AS subquery WHERE users.id = subquery.user_id;",
+        "estimated_speedup": 15.0
+      }
+    ],
+    "warnings": [
+      "Потенциальная проблема с оценкой количества строк: план показывает 170 строк для users, но время выполнения 0 мс и количество обработанных строк 0 кажутся противоречивыми. Возможно устаревшая статистика или неправильная оценка оптимизатором.",
+      "Использование последовательного сканирования (Seq Scan) вместо индексного сканирования для таблицы users. Это может быть неэффективно при больших объемах данных.",
+      "Отсутствие индексов на orders.user_id и orders.total_amount приводит к полному сканированию таблицы orders, что может быть ресурсоемким при больших объемах данных.",
+      "Возможные блокировки таблицы users во время выполнения UPDATE, особенно если таблица активно используется другими транзакциями."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "598b04419b935443a3afb65d7fb127f2": {
+    "query": "UPDATE orders SET status = 'archived' WHERE created_at < '2023-01-01'",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 0.0,
+      "memory_usage": 0.0,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "high",
+        "priority": "high",
+        "title": "Создать индекс на поле created_at",
+        "description": "Поскольку запрос фильтрует по полю created_at, создание индекса на это поле значительно ускорит выполнение запроса. Последовательное сканирование (Seq Scan), указанное в плане выполнения, означает, что PostgreSQL должен просматривать всю таблицу, чтобы найти подходящие строки.",
+        "potential_improvement": "Создание индекса может ускорить выполнение запроса в десятки раз, особенно при больших объемах данных.",
+        "implementation": "CREATE INDEX idx_orders_created_at ON orders(created_at);",
+        "estimated_speedup": 10.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Проверить статистику таблицы",
+        "description": "План выполнения показывает стоимость 18.62 и 0 строк, но ожидается 230 строк. Это может указывать на устаревшую статистику таблицы, что может привести к неоптимальному выбору плана выполнения.",
+        "potential_improvement": "Обновление статистики поможет оптимизатору лучше оценить количество строк и выбрать более эффективный план выполнения.",
+        "implementation": "ANALYZE orders;",
+        "estimated_speedup": 2.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Рассмотреть возможность использования партиционирования",
+        "description": "Если таблица orders содержит очень большие объемы данных, партиционирование по полю created_at может значительно улучшить производительность запросов, фильтрующих по дате.",
+        "potential_improvement": "Партиционирование может уменьшить объем данных, которые необходимо сканировать для выполнения запроса.",
+        "implementation": "CREATE TABLE orders_partitioned (LIKE orders INCLUDING ALL)\nPARTITION BY RANGE (created_at);\n\nCREATE TABLE orders_2022 PARTITION OF orders_partitioned\nFOR VALUES FROM ('2022-01-01') TO ('2023-01-01');\n\nCREATE TABLE orders_2023 PARTITION OF orders_partitioned\nFOR VALUES FROM ('2023-01-01') TO ('2024-01-01');",
+        "estimated_speedup": 5.0
+      }
+    ],
+    "warnings": [
+      "План выполнения показывает 0 строк, но ожидается 230 строк. Это может указывать на устаревшую статистику таблицы или на то, что в таблице действительно нет данных, удовлетворяющих условию. Проверьте данные в таблице.",
+      "Использование последовательного сканирования (Seq Scan), а не индексного сканирования (Index Scan), может быть неэффективным при больших объемах данных.",
+      "Для UPDATE операции может быть применена блокировка на уровне строк или таблицы, что может повлиять на производительность других операций, выполняемых одновременно."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "4193c7727fa5a7c90af3ebd8351c67e8": {
+    "query": "UPDATE orders SET total_amount = (SELECT SUM(quantity * price) FROM order_items WHERE order_id = orders.id)",
+    "rewritten_query": "WITH updated_totals AS (SELECT order_id, SUM(quantity * price) AS total_amount FROM order_items GROUP BY order_id) UPDATE orders SET total_amount = updated_totals.total_amount FROM updated_totals WHERE orders.id = updated_totals.order_id;",
+    "resource_metrics": {
+      "cpu_usage": 15.0,
+      "memory_usage": 1.2,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.95,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс для order_items.order_id",
+        "description": "Создание индекса на поле order_id в таблице order_items",
+        "potential_improvement": "Индекс на поле order_id в таблице order_items позволит ускорить выполнение подзапроса, так как сейчас используется Seq Scan, что неэффективно при фильтрации по order_id. Использование индекса сократит количество обрабатываемых строк и уменьшит время выполнения запроса.",
+        "implementation": "CREATE INDEX idx_order_items_order_id ON order_items(order_id);",
+        "estimated_speedup": 90.0
+      },
+      {
+        "type": "query_rewrite",
+        "priority": "medium",
+        "title": "Переписать запрос с использованием CTE",
+        "description": "Оптимизация запроса через CTE или JOIN вместо подзапроса",
+        "potential_improvement": "Текущий запрос использует подзапрос, который выполняется для каждой строки в orders. Это может быть неэффективно, особенно если таблица orders содержит много записей. Использование CTE или JOIN может уменьшить количество повторных вычислений и улучшить производительность.",
+        "implementation": "rewritten_query",
+        "estimated_speedup": 70.0
+      },
+      {
+        "type": "db_tuning",
+        "priority": "low",
+        "title": "Обновить статистику таблиц",
+        "description": "Анализ и обновление статистики таблиц",
+        "potential_improvement": "Планировщик может использовать устаревшую статистику для оценки стоимости запроса. Обновление статистики поможет ему выбрать более оптимальный план выполнения.",
+        "implementation": "ANALYZE orders; ANALYZE order_items;",
+        "estimated_speedup": 20.0
+      }
+    ],
+    "warnings": [
+      "Потенциальная проблема с оценкой количества строк: заявлено 117300 строк, но в результате обновления 0 строк. Возможно, запрос не затрагивает данные, или статистика таблицы устарела.",
+      "Отсутствие индекса на order_id в таблице order_items приводит к Seq Scan, что может быть медленным при больших объемах данных.",
+      "Потенциальная проблема с производительностью: запрос использует Nested Loop, что может быть неэффективно при больших объемах данных. Рассмотрите возможность использования более оптимального метода соединения, если индексы не помогут.",
+      "Внимание: запрос может блокировать таблицу orders во время выполнения, особенно если обновляется большое количество строк. Рассмотрите выполнение в пиковые часы с осторожностью."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "1362b407b5a4cf0cc65ab9d453aefbf4": {
+    "query": "DELETE FROM users WHERE email = 'old@example.com'",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 0.1,
+      "memory_usage": 0.01,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 1.0,
+      "cache_hit_ratio": 100.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "statistics",
+        "priority": "medium",
+        "title": "Обновление статистики",
+        "description": "Проверка актуальности статистики таблицы users",
+        "potential_improvement": "Улучшение оценки стоимости запроса и более точное планирование операций DELETE.",
+        "implementation": "Выполните команду ANALYZE users; для обновления статистики таблицы. Это поможет оптимизатору лучше оценивать количество строк и стоимость операций.",
+        "estimated_speedup": 5.0
+      },
+      {
+        "type": "index",
+        "priority": "medium",
+        "title": "Проверка индекса",
+        "description": "Проверка наличия и качества индекса idx_users_email",
+        "potential_improvement": "Индекс уже используется, но его состояние и актуальность могут влиять на производительность операции удаления.",
+        "implementation": "Убедитесь, что индекс idx_users_email действительно существует и актуален. Также проверьте, что он содержит поле email и не устарел (например, из-за массовых вставок/обновлений).",
+        "estimated_speedup": 10.0
+      },
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Создание покрывающего индекса",
+        "description": "Рассмотрите возможность использования покрывающего индекса (covering index) для поля email, если требуется удаление по этому полю часто",
+        "potential_improvement": "Снижение количества I/O операций, так как данные будут извлекаться напрямую из индекса, без обращения к основной таблице.",
+        "implementation": "Создайте индекс, включающий все необходимые для удаления поля, например: CREATE INDEX idx_users_email_covering ON users(email) INCLUDE (id);",
+        "estimated_speedup": 15.0
+      },
+      {
+        "type": "transaction",
+        "priority": "medium",
+        "title": "Управление блокировками",
+        "description": "Использование транзакций и проверка блокировок при выполнении DELETE",
+        "potential_improvement": "Снижение вероятности конфликтов блокировок и повышение стабильности приложения.",
+        "implementation": "Выполняйте DELETE в транзакции, чтобы минимизировать блокировки. Также проверьте, не блокируются ли другие операции на таблице users из-за этой операции удаления.",
+        "estimated_speedup": 5.0
+      }
+    ],
+    "warnings": [
+      "Внимание: Общее количество строк в таблице users (по статистике) не совпадает с ожидаемым (в плане указано 1 строка, но в статистике может быть больше). Возможно, статистика устарела.",
+      "Предупреждение: Операция DELETE может вызвать блокировки на уровне строк или таблицы, особенно если email — это часто используемый ключ. Рекомендуется выполнять такие операции в транзакциях и в низкоактивное время.",
+      "Предупреждение: Если поле email не уникально, операция DELETE может затронуть несколько строк. Убедитесь, что это ожидаемое поведение."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "c31b30986533d6ab69754a14d172fec2": {
+    "query": "DELETE FROM orders USING users u WHERE orders.user_id = u.id AND u.email = 'john@example.com'",
+    "rewritten_query": "WITH target_users AS (SELECT id FROM users WHERE email = 'john@example.com') DELETE FROM orders WHERE user_id IN (SELECT id FROM target_users);",
+    "resource_metrics": {
+      "cpu_usage": 0.0,
+      "memory_usage": 0.0,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 100.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс на users.email",
+        "description": "Создание индекса на поле users.email: Добавьте индекс на поле email таблицы users, чтобы ускорить фильтрацию по условию u.email = 'john@example.com'.",
+        "potential_improvement": "Индекс на поле email позволит PostgreSQL быстро находить нужные строки в таблице users, что сократит время выполнения DELETE запроса.",
+        "implementation": "CREATE INDEX idx_users_email ON users(email);",
+        "estimated_speedup": 90.0
+      },
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс на orders.user_id",
+        "description": "Создание индекса на поле orders.user_id: Добавьте индекс на поле user_id таблицы orders, чтобы ускорить JOIN с таблицей users.",
+        "potential_improvement": "Индекс на user_id позволит PostgreSQL эффективно находить связанные строки в таблице orders, что ускорит выполнение DELETE запроса.",
+        "implementation": "CREATE INDEX idx_orders_user_id ON orders(user_id);",
+        "estimated_speedup": 80.0
+      },
+      {
+        "type": "query_rewrite",
+        "priority": "medium",
+        "title": "Использование CTE",
+        "description": "Рассмотрите возможность использования CTE или подзапроса для предварительного фильтра: Это может помочь оптимизатору лучше оценить объем данных для удаления.",
+        "potential_improvement": "Использование CTE может улучшить читаемость запроса и помочь оптимизатору сгенерировать более эффективный план выполнения.",
+        "implementation": "WITH target_users AS (SELECT id FROM users WHERE email = 'john@example.com') DELETE FROM orders WHERE user_id IN (SELECT id FROM target_users);",
+        "estimated_speedup": 20.0
+      }
+    ],
+    "warnings": [
+      "Потенциальная проблема с оценкой количества строк: план показывает 1 строку, но количество строк в таблице может быть больше. Возможно устаревшая статистика.",
+      "Отсутствие индексов на поля email и user_id приводит к полному сканированию таблиц, что может быть неэффективным при больших объемах данных.",
+      "DELETE операция может вызвать блокировки на уровне строк или таблиц, особенно если таблица orders активно используется другими транзакциями."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "048a2de05934858b31b124aa48454f90": {
+    "query": "DELETE FROM users WHERE id IN (SELECT user_id FROM orders WHERE total_amount < 10)",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 5.0,
+      "memory_usage": 0.5,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.95,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс для orders.user_id",
+        "description": "Создание индекса на поле orders.user_id для ускорения операции Hash Join",
+        "potential_improvement": "Ускорит выполнение операции JOIN, особенно при больших объемах данных, за счет использования индекса вместо Seq Scan.",
+        "implementation": "CREATE INDEX idx_orders_user_id ON orders(user_id);",
+        "estimated_speedup": 50.0
+      },
+      {
+        "type": "index",
+        "priority": "medium",
+        "title": "Индекс для orders.total_amount",
+        "description": "Создание индекса на поле orders.total_amount для ускорения фильтрации подзапроса",
+        "potential_improvement": "Ускорит выполнение Seq Scan в подзапросе, особенно если таблица orders содержит много записей.",
+        "implementation": "CREATE INDEX idx_orders_total_amount ON orders(total_amount);",
+        "estimated_speedup": 30.0
+      },
+      {
+        "type": "db_configuration",
+        "priority": "low",
+        "title": "Обновление статистики",
+        "description": "Обновление статистики таблиц users и orders для более точного планирования запроса",
+        "potential_improvement": "Поможет оптимизатору лучше оценить количество строк и выбрать более эффективный план выполнения.",
+        "implementation": "ANALYZE users; ANALYZE orders;",
+        "estimated_speedup": 10.0
+      }
+    ],
+    "warnings": [
+      "Потенциальная проблема с оценкой количества строк: план показывает 170 строк для users, но количество обработанных строк равно 0. Это может указывать на устаревшую статистику или на то, что таблица users пуста.",
+      "Полное сканирование таблицы orders (230 строк) может быть неэффективным при увеличении объема данных. Рекомендуется добавить индекс на поле user_id.",
+      "Потенциальная проблема с блокировками: операция DELETE может блокировать строки в таблице users, особенно если она используется другими транзакциями. Рассмотрите выполнение в транзакции с минимальным временем жизни или в небольшими партиями."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "5c017da96b81a4914a5ce1d3594d1c73": {
+    "query": "DELETE FROM orders WHERE created_at < '2022-01-01'",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 0.0,
+      "memory_usage": 0.0,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "high",
+        "priority": "high",
+        "title": "Создать индекс на поле created_at",
+        "description": "Поскольку запрос удаляет данные по условию created_at < '2022-01-01', создание индекса на поле created_at позволит PostgreSQL быстро находить строки, удовлетворяющие условию, вместо полного сканирования таблицы.",
+        "potential_improvement": "Значительное ускорение выполнения запроса, особенно при больших объемах данных",
+        "implementation": "CREATE INDEX idx_orders_created_at ON orders(created_at) WHERE created_at < '2022-01-01';\n\n-- После создания индекса рекомендуется выполнить:\nVACUUM ANALYZE orders;",
+        "estimated_speedup": 100.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Рассмотреть возможность использования партиционирования",
+        "description": "Если таблица orders содержит очень большие объемы данных, партиционирование по полю created_at может значительно улучшить производительность операций удаления.",
+        "potential_improvement": "Ускорение операций удаления и улучшение общей производительности при работе с большими таблицами",
+        "implementation": "1. Создайте партиционированную таблицу:\nCREATE TABLE orders_partitioned (\n    id SERIAL PRIMARY KEY,\n    -- остальные поля\n    created_at TIMESTAMP\n) PARTITION BY RANGE (created_at);\n\n2. Создайте партиции:\nCREATE TABLE orders_2021 PARTITION OF orders_partitioned FOR VALUES FROM ('2021-01-01') TO ('2022-01-01');\nCREATE TABLE orders_2022 PARTITION OF orders_partitioned FOR VALUES FROM ('2022-01-01') TO ('2023-01-01');\n\n3. Перенесите данные из старой таблицы:\nINSERT INTO orders_partitioned SELECT * FROM orders;\n\n4. Удалите старую таблицу и переименуйте новую:\nDROP TABLE orders;\nALTER TABLE orders_partitioned RENAME TO orders;\n\n5. Обновите статистику:\nVACUUM ANALYZE orders;",
+        "estimated_speedup": 50.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Регулярное выполнение VACUUM и ANALYZE",
+        "description": "Регулярное выполнение VACUUM и ANALYZE поможет поддерживать актуальность статистики и улучшать производительность запросов.",
+        "potential_improvement": "Улучшение производительности всех запросов за счет более точной статистики и оптимизации хранения данных",
+        "implementation": "CREATE OR REPLACE FUNCTION vacuum_analyze_orders()\nRETURNS TRIGGER AS $$\nBEGIN\n    PERFORM VACUUM ANALYZE orders;\n    RETURN NULL;\nEND;\n$$ LANGUAGE plpgsql;\n\nCREATE TRIGGER vacuum_analyze_orders_trigger\nAFTER DELETE ON orders\nFOR EACH STATEMENT\nEXECUTE FUNCTION vacuum_analyze_orders();",
+        "estimated_speedup": 10.0
+      }
+    ],
+    "warnings": [
+      "Полное сканирование таблицы (Seq Scan) может быть очень медленным при больших объемах данных",
+      "Отсутствие индекса на поле created_at приводит к полному сканированию таблицы",
+      "Запрос может блокировать таблицу на время выполнения, особенно при больших объемах данных",
+      "После удаления данных рекомендуется выполнить VACUUM для освобождения пространства на диске",
+      "Время выполнения запроса указано как 0 мс, что может быть связано с тем, что не было найдено ни одной строки для удаления или статистика устарела"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "4520b7d8c391ffd9ac373323b3c6ca0a": {
+    "query": "DELETE FROM users WHERE is_active = false LIMIT 100",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 0.0,
+      "memory_usage": 0.0,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "high",
+        "priority": "high",
+        "title": "Создать индекс на поле is_active",
+        "description": "Добавление индекса на поле is_active в таблице users позволит значительно ускорить фильтрацию строк при выполнении DELETE операции. Поскольку запрос удаляет записи с is_active = false, индекс позволит БД быстро находить эти строки без полного сканирования таблицы.",
+        "potential_improvement": "Ускорение выполнения DELETE операции на 90-95%",
+        "implementation": "CREATE INDEX idx_users_is_active ON users(is_active);",
+        "estimated_speedup": 90.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Оптимизация удаления больших объемов данных",
+        "description": "Если необходимо удалить большое количество данных, рекомендуется использовать циклическое удаление с небольшими порциями и коммитами, чтобы избежать блокировок и проблем с транзакционной логикой.",
+        "potential_improvement": "Уменьшение времени блокировки таблицы и снижение нагрузки на транзакционный лог",
+        "implementation": "DO $$\n  DECLARE\n    r RECORD;\n  BEGIN\n    FOR r IN 1..1000 LOOP\n      DELETE FROM users WHERE is_active = false LIMIT 100;\n      COMMIT;\n      PERFORM pg_sleep_for('100ms');\n    END LOOP;\n  END\n$$;",
+        "estimated_speedup": 30.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Обновление статистики таблицы",
+        "description": "План выполнения показывает, что ожидается 85 строк, но фактически обработано 0 строк. Это может указывать на устаревшую статистику таблицы. Обновление статистики поможет оптимизатору лучше оценивать количество строк и выбирать более эффективный план выполнения.",
+        "potential_improvement": "Улучшение оценки оптимизатором количества строк",
+        "implementation": "ANALYZE users;",
+        "estimated_speedup": 5.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Рассмотреть возможность использования партиционирования",
+        "description": "Если таблица users содержит очень большое количество данных, можно рассмотреть возможность партиционирования по полю is_active. Это позволит физически разделить данные и ускорить операции с конкретными значениями is_active.",
+        "potential_improvement": "Ускорение операций с данными при условии, что таблица содержит очень большое количество строк",
+        "implementation": "CREATE TABLE users_partitioned (LIKE users INCLUDING ALL)\nPARTITION BY LIST (is_active);\n\nCREATE TABLE users_active PARTITION OF users_partitioned FOR VALUES IN (true);\nCREATE TABLE users_inactive PARTITION OF users_partitioned FOR VALUES IN (false);\n\nINSERT INTO users_partitioned SELECT * FROM users;\nDROP TABLE users;\nALTER TABLE users_partitioned RENAME TO users;",
+        "estimated_speedup": 20.0
+      }
+    ],
+    "warnings": [
+      "Потенциальная проблема с оценкой количества строк: план показывает 85 строк, но фактически обработано 0 строк. Это может указывать на устаревшую статистику таблицы.",
+      "Использование последовательного сканирования (Seq Scan) вместо индексного сканирования. Это может быть неэффективно при больших объемах данных.",
+      "DELETE операция может вызывать блокировки таблицы, особенно если удаляются много строк или если есть активные транзакции, обращающиеся к этой таблице."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "bd78968b7805df41fadde488ec9e457e": {
+    "query": "UPDATE users SET last_login = NOW() WHERE name LIKE '%John%'",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 5.0,
+      "memory_usage": 0.5,
+      "io_operations": 1,
+      "disk_reads": 1,
+      "disk_writes": 0,
+      "disk_io": 1.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 100.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "Индекс",
+        "priority": "high",
+        "title": "Создать индекс на поле name",
+        "description": "Поскольку запрос использует LIKE с ведущим подстановочным знаком, обычный индекс не поможет. Рассмотрите использование функционального индекса с оператором @@ или индекса GIN/GiST для полнотекстового поиска",
+        "potential_improvement": "Ускорение выполнения запроса на 90-95% при больших объемах данных",
+        "implementation": "CREATE INDEX idx_users_name_gin ON users USING GIN (to_tsvector('english', name));\n\n-- Или для точного совпадения:\nCREATE INDEX idx_users_name_lower ON users (lower(name));\n\n-- Затем измените запрос:\nUPDATE users SET last_login = NOW() WHERE lower(name) LIKE '%john%';\n\n-- Для GIN индекса:\nUPDATE users SET last_login = NOW() WHERE to_tsvector('english', name) @@ to_tsquery('english', 'John');\n\n-- Не забудьте обновить статистику после создания индекса:\nANALYZE users;",
+        "estimated_speedup": 90.0
+      },
+      {
+        "type": "Настройка",
+        "priority": "medium",
+        "title": "Обновить статистику таблицы",
+        "description": "План показывает 1 строку, но если таблица содержит много данных, статистика может быть устаревшей. Это влияет на выбор оптимального плана выполнения",
+        "potential_improvement": "Улучшение оценки планировщика на 30-50%",
+        "implementation": "ANALYZE users;\n\n-- Для более точной статистики:\nANALYZE users (name, last_login);",
+        "estimated_speedup": 30.0
+      },
+      {
+        "type": "Оптимизация запроса",
+        "priority": "low",
+        "title": "Использовать более точный оператор поиска",
+        "description": "LIKE с ведущим % не может использовать обычные индексы. Рассмотрите использование полнотекстового поиска или иные методы фильтрации",
+        "potential_improvement": "Ускорение на 20-40% при использовании полнотекстового поиска",
+        "implementation": "UPDATE users SET last_login = NOW() \nWHERE to_tsvector('english', name) @@ to_tsquery('english', 'John');",
+        "estimated_speedup": 25.0
+      }
+    ],
+    "warnings": [
+      "Последовательное сканирование (Seq Scan) используется вместо индексного сканирования",
+      "LIKE с ведущим подстановочным знаком не может эффективно использовать обычные индексы",
+      "Обновление статистики может быть необходимо для точной оценки количества строк",
+      "Потенциальная проблема с блокировками при конкурентных UPDATE операциях"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "7d053610be29228c5d64fd7d0060b30f": {
+    "query": "DELETE FROM orders WHERE status LIKE '%old%'",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 5.0,
+      "memory_usage": 0.1,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс для фильтрации по status",
+        "description": "Создание индекса на поле status таблицы orders для ускорения фильтрации строк, удовлетворяющих условию LIKE '%old%'.",
+        "potential_improvement": "При использовании индекса, PostgreSQL может быстрее находить строки, соответствующие условию LIKE, особенно если количество таких строк невелико. Однако, для LIKE с ведущим подстановочным символом (%) индекс может не использоваться, если количество совпадений велико. Рассмотрите использование частичного индекса или полнотекстового поиска при частом использовании подобных условий.",
+        "implementation": "CREATE INDEX idx_orders_status ON orders (status);",
+        "estimated_speedup": 70.0
+      },
+      {
+        "type": "index",
+        "priority": "medium",
+        "title": "Частичный индекс для часто удаляемых строк",
+        "description": "Использование частичного индекса, если DELETE выполняется часто и только для строк с определённым status (например, 'old').",
+        "potential_improvement": "Частичный индекс позволяет создать индекс только для строк, удовлетворяющих условию WHERE. Это уменьшает размер индекса и ускоряет выполнение DELETE, особенно если только малая часть таблицы удаляется.",
+        "implementation": "CREATE INDEX idx_orders_status_old ON orders (id) WHERE status = 'old';",
+        "estimated_speedup": 85.0
+      },
+      {
+        "type": "db_configuration",
+        "priority": "low",
+        "title": "Партиционирование таблицы orders",
+        "description": "Рассмотрите возможность использования партиционирования таблицы orders, если объём данных велик и DELETE выполняется часто.",
+        "potential_improvement": "Партиционирование позволяет ускорить операции удаления, если данные можно разделить по временным или категориальным признакам, и удалять только нужные партиции.",
+        "implementation": "Рекомендуется провести анализ объёма данных и частоты операций DELETE перед реализацией партиционирования. Пример: PARTITION BY RANGE (created_at);",
+        "estimated_speedup": 50.0
+      }
+    ],
+    "warnings": [
+      "Потенциальная проблема с производительностью: Условие LIKE '%old%' не может эффективно использовать обычный индекс, если количество совпадающих строк велико. Рассмотрите использование частичного индекса или полнотекстового поиска.",
+      "Внимание: DELETE без LIMIT может привести к блокировке таблицы на длительное время, особенно при большом объёме данных. Рекомендуется выполнять удаление пакетами.",
+      "Предупреждение: Удаление без явного указания LIMIT может вызвать высокую нагрузку на систему, особенно если таблица содержит миллионы строк. Рассмотрите использование DELETE в цикле с LIMIT и OFFSET для снижения нагрузки и предотвращения блокировок."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "84f3b0875864098cd88090a9f16085e5": {
+    "query": "SELECT * FROM non_existent_table WHERE id = 1",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 0.0,
+      "memory_usage": 0.0,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "schema",
+        "priority": "high",
+        "title": "Создание отсутствующей таблицы",
+        "description": "Создайте таблицу non_existent_table, так как она отсутствует в базе данных. Запрос не может быть выполнен из-за ошибки, связанной с несуществующей таблицей.",
+        "potential_improvement": "Запрос перестанет вызывать ошибку и сможет быть выполнен. После создания таблицы, можно будет оценить производительность и добавить индексы при необходимости.",
+        "implementation": "CREATE TABLE non_existent_table (id SERIAL PRIMARY KEY, ...);",
+        "estimated_speedup": 100.0
+      },
+      {
+        "type": "schema",
+        "priority": "high",
+        "title": "Создание индекса на поле id",
+        "description": "Если таблица non_existent_table будет создана, рекомендуется добавить индекс на поле id для ускорения фильтрации по этому столбцу.",
+        "potential_improvement": "Индекс на поле id позволит PostgreSQL выполнять поиск по нему с использованием индексного сканирования, что значительно сократит время выполнения запроса при наличии данных.",
+        "implementation": "CREATE INDEX idx_non_existent_table_id ON non_existent_table(id);",
+        "estimated_speedup": 90.0
+      },
+      {
+        "type": "schema",
+        "priority": "medium",
+        "title": "Обновление статистики таблицы",
+        "description": "Если таблица будет создана и будет содержать много данных, рекомендуется обновить статистику таблицы, чтобы оптимизатор мог генерировать более точные планы выполнения запросов.",
+        "potential_improvement": "Обновление статистики поможет оптимизатору лучше оценить количество строк и выбрать наиболее эффективный план выполнения.",
+        "implementation": "ANALYZE non_existent_table;",
+        "estimated_speedup": 20.0
+      }
+    ],
+    "warnings": [
+      "Ошибка выполнения запроса: таблица non_existent_table не существует. Запрос не может быть выполнен.",
+      "Запрос не может быть оптимизирован, пока таблица не будет создана.",
+      "Отсутствие таблицы может привести к ошибкам в приложении, если запрос вызывается регулярно."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "00384a8aa5b2c1b2d64709a8c7d0d060": {
+    "query": "SELECT non_existent_column FROM users WHERE id = 1",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 0.0,
+      "memory_usage": 0.0,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "query_rewrite",
+        "priority": "high",
+        "title": "Ошибка в запросе: отсутствующий столбец",
+        "description": "Убедитесь, что имя столбца указано правильно. Запрос пытается выбрать несуществующий столбец `non_existent_column` из таблицы `users`, что приводит к ошибке выполнения.",
+        "potential_improvement": "Исправление запроса позволит избежать ошибки и позволит корректно выполнить выборку данных.",
+        "implementation": "Проверьте структуру таблицы `users` с помощью команды `SELECT * FROM information_schema.columns WHERE table_name = 'users';` и исправьте имя столбца в запросе.",
+        "estimated_speedup": 0.0
+      }
+    ],
+    "warnings": [
+      "Ошибка: Запрашиваемый столбец `non_existent_column` не существует в таблице `users`. Это приведет к ошибке выполнения запроса.",
+      "Предупреждение: Запрос не может быть выполнен из-за синтаксической или структурной ошибки. План выполнения не содержит полезной информации о производительности."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "5070762717d7c19c21bade0bd0a930e8": {
+    "query": "SELECT * FROM users WHERE id = (SELECT MAX(id) FROM orders",
+    "rewritten_query": "SELECT u.* FROM users u JOIN (SELECT MAX(id) AS max_id FROM orders) AS o_max ON u.id = o_max.max_id;",
+    "resource_metrics": {
+      "cpu_usage": 0.0,
+      "memory_usage": 0.0,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс на orders.id",
+        "description": "Добавьте индекс на поле orders.id для ускорения подзапроса MAX(id)",
+        "potential_improvement": "Позволит избежать полного сканирования таблицы orders при поиске максимального значения id, что ускорит выполнение подзапроса.",
+        "implementation": "CREATE INDEX idx_orders_id ON orders(id);",
+        "estimated_speedup": 50.0
+      },
+      {
+        "type": "index",
+        "priority": "medium",
+        "title": "Индекс на users.id",
+        "description": "Добавьте индекс на поле users.id для ускорения поиска пользователя по максимальному id из orders",
+        "potential_improvement": "Позволит БД быстро находить запись в таблице users по id, полученному из подзапроса.",
+        "implementation": "CREATE INDEX idx_users_id ON users(id);",
+        "estimated_speedup": 30.0
+      },
+      {
+        "type": "query_rewrite",
+        "priority": "low",
+        "title": "Переписать запрос с JOIN",
+        "description": "Рассмотрите возможность переписать запрос с использованием JOIN вместо подзапроса",
+        "potential_improvement": "Использование JOIN может быть более эффективным, особенно если запрос будет расширяться в будущем.",
+        "implementation": "SELECT u.* FROM users u JOIN (SELECT MAX(id) AS max_id FROM orders) AS o_max ON u.id = o_max.max_id;",
+        "estimated_speedup": 20.0
+      }
+    ],
+    "warnings": [
+      "План выполнения не предоставлен, невозможно точно оценить эффективность запроса.",
+      "Отсутствие индекса на orders.id может привести к полному сканированию таблицы при выполнении подзапроса MAX(id).",
+      "Отсутствие индекса на users.id может замедлить поиск записи по id, полученному из подзапроса.",
+      "Запрос может быть неэффективным при больших объемах данных в таблице orders из-за отсутствия индекса."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "04e2d9a63cf545511643043ae148e8fc": {
+    "query": "\n                SELECT * FROM users WHERE email = 'john@example.com';\n                SELECT COUNT(*) as order_count FROM orders\n                WHERE user_id = (SELECT id FROM users WHERE email = 'john@example.com');\n                SELECT o.total_amount, oi.product_name FROM orders o\n                JOIN order_items oi ON o.id = oi.order_id\n                WHERE o.user_id = (SELECT id FROM users WHERE email = 'john@example.com')\n                ORDER BY o.created_at DESC;\n                ",
+    "rewritten_query": "WITH user_info AS (SELECT id FROM users WHERE email = 'john@example.com') SELECT u.id, u.email FROM user_info u; SELECT COUNT(*) as order_count FROM orders o JOIN user_info u ON o.user_id = u.id; SELECT o.total_amount, oi.product_name FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN user_info u ON o.user_id = u.id ORDER BY o.created_at DESC;",
+    "resource_metrics": {
+      "cpu_usage": 0.1,
+      "memory_usage": 0.01,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 100.0,
+      "cache_hit_ratio": 99.9,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Добавить индекс на поле orders.user_id",
+        "description": "Добавить индекс на поле orders.user_id для ускорения фильтрации и JOIN-ов",
+        "potential_improvement": "Ускорит выполнение второго и третьего запросов, так как они фильтруют по user_id, и третий запрос использует JOIN по этому полю.",
+        "implementation": "CREATE INDEX idx_orders_user_id ON orders(user_id);",
+        "estimated_speedup": 50.0
+      },
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Создать составной индекс на orders(user_id, created_at, total_amount)",
+        "description": "Создать составной индекс на orders(user_id, created_at, total_amount) для покрытия третьего запроса",
+        "potential_improvement": "Этот индекс позволит избежать чтения данных из основной таблицы при выполнении третьего запроса, так как содержит все необходимые поля (user_id, created_at, total_amount).",
+        "implementation": "CREATE INDEX idx_orders_user_id_created_at_total_amount ON orders(user_id, created_at DESC, total_amount);",
+        "estimated_speedup": 70.0
+      },
+      {
+        "type": "index",
+        "priority": "medium",
+        "title": "Создать составной индекс на order_items(order_id, product_name)",
+        "description": "Создать составной индекс на order_items(order_id, product_name) для покрытия JOIN-а в третьем запросе",
+        "potential_improvement": "Позволит PostgreSQL избежать полного сканирования таблицы order_items при JOIN-е с orders.",
+        "implementation": "CREATE INDEX idx_order_items_order_id_product_name ON order_items(order_id, product_name);",
+        "estimated_speedup": 40.0
+      },
+      {
+        "type": "db_configuration",
+        "priority": "medium",
+        "title": "Обновить статистику таблиц",
+        "description": "Обновить статистику таблиц users, orders, order_items для более точного планирования запросов",
+        "potential_improvement": "Поможет оптимизатору лучше оценить количество строк и выбрать более эффективный план выполнения.",
+        "implementation": "ANALYZE users; ANALYZE orders; ANALYZЕ order_items;",
+        "estimated_speedup": 10.0
+      },
+      {
+        "type": "query_rewrite",
+        "priority": "medium",
+        "title": "Использовать CTE для объединения запросов",
+        "description": "Использовать CTE (Common Table Expression) для объединения запросов в один, чтобы избежать дублирования подзапроса (SELECT id FROM users WHERE email = 'john@example.com')",
+        "potential_improvement": "Уменьшит количество выполнений подзапроса и упростит логику запросов, особенно если расширится цепочка.",
+        "implementation": "WITH user_info AS (SELECT id FROM users WHERE email = 'john@example.com') SELECT * FROM user_info; SELECT COUNT(*) as order_count FROM orders o JOIN user_info u ON o.user_id = u.id; SELECT o.total_amount, oi.product_name FROM orders o JOIN order_items oi ON o.id = oi.order_id JOIN user_info u ON o.user_id = u.id ORDER BY o.created_at DESC;",
+        "estimated_speedup": 30.0
+      },
+      {
+        "type": "query_rewrite",
+        "priority": "medium",
+        "title": "Использовать JOIN вместо подзапроса в третьем запросе",
+        "description": "Использовать JOIN вместо подзапроса в третьем запросе для более читаемой и оптимизируемой структуры",
+        "potential_improvement": "Позволит оптимизатору лучше оптимизировать JOIN-ы и избежать повторного выполнения подзапроса.",
+        "implementation": "SELECT o.total_amount, oi.product_name FROM users u JOIN orders o ON u.id = o.user_id JOIN order_items oi ON o.id = oi.order_id WHERE u.email = 'john@example.com' ORDER BY o.created_at DESC;",
+        "estimated_speedup": 20.0
+      },
+      {
+        "type": "query_rewrite",
+        "priority": "low",
+        "title": "Добавить LIMIT в третий запрос",
+        "description": "Использовать LIMIT в третьем запросе, если не требуется полный набор данных",
+        "potential_improvement": "Снизит нагрузку на память и I/O, особенно если пользователь не нуждается во всех заказах.",
+        "implementation": "SELECT o.total_amount, oi.product_name FROM orders o JOIN order_items oi ON o.id = oi.order_id WHERE o.user_id = (SELECT id FROM users WHERE email = 'john@example.com') ORDER BY o.created_at DESC LIMIT 100;",
+        "estimated_speedup": 15.0
+      }
+    ],
+    "warnings": [
+      "Повторное выполнение подзапроса (SELECT id FROM users WHERE email = 'john@example.com') в каждом из запросов может быть неэффективным. Рекомендуется использовать CTE или переменную для хранения результата.",
+      "Возможное несоответствие статистики таблицы users (0 строк в плане, но таблица содержит данные). Это может привести к неточному планированию запросов.",
+      "SELECT * в первом запросе возвращает все поля таблицы users. Рекомендуется указывать только необходимые поля для уменьшения объема передаваемых данных.",
+      "В третьем запросе отсутствует LIMIT, что может привести к возврату большого объема данных, если пользователь имеет много заказов. Это может негативно сказаться на производительности и потреблении памяти.",
+      "Отсутствие индекса на orders.user_id может привести к полному сканированию таблицы при выполнении второго и третьего запросов."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "61eb76cecdecfa34c18a8309dd337b3e": {
+    "query": "\n                SELECT DATE(created_at) as date, COUNT(*) as orders_count, SUM(total_amount) as total_revenue\n                FROM orders\n                WHERE created_at >= CURRENT_DATE - INTERVAL '7 days'\n                GROUP BY DATE(created_at)\n                ORDER BY date;\n                SELECT u.name, COUNT(o.id) as user_orders, SUM(o.total_amount) as user_spent\n                FROM users u\n                LEFT JOIN orders o ON u.id = o.user_id\n                WHERE o.created_at >= CURRENT_DATE - INTERVAL '7 days' OR o.created_at IS NULL\n                GROUP BY u.id, u.name\n                HAVING COUNT(o.id) > 0\n                ORDER BY user_spent DESC\n                LIMIT 10;\n                ",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 0.0,
+      "memory_usage": 0.0,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "high",
+        "priority": "high",
+        "title": "Создание индекса для orders.created_at",
+        "description": "Добавьте индекс на поле created_at таблицы orders для ускорения фильтрации по дате создания заказов. Это значительно ускорит оба запроса, так как оба фильтруют данные за последние 7 дней.",
+        "potential_improvement": "Ускорение выполнения обоих запросов на 50-80%",
+        "implementation": "CREATE INDEX idx_orders_created_at ON orders(created_at);",
+        "estimated_speedup": 70.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Создание индекса для orders.user_id",
+        "description": "Добавьте индекс на поле user_id таблицы orders для ускорения операции JOIN в втором запросе. Это ускорит выполнение второго запроса, особенно при работе с большими объемами данных.",
+        "potential_improvement": "Ускорение второго запроса на 30-50%",
+        "implementation": "CREATE INDEX idx_orders_user_id ON orders(user_id);",
+        "estimated_speedup": 40.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Оптимизация условия WHERE во втором запросе",
+        "description": "Условие WHERE в втором запросе может быть упрощено. Вместо использования OR с проверкой IS NULL можно использовать более эффективную конструкцию, которая позволит лучше использовать индексы.",
+        "potential_improvement": "Улучшение использования индексов и ускорение фильтрации",
+        "implementation": "Измените условие WHERE на: WHERE o.created_at >= CURRENT_DATE - INTERVAL '7 days'",
+        "estimated_speedup": 20.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Обновление статистики таблиц",
+        "description": "Обновите статистику таблиц orders и users для более точного планирования запросов. Это поможет оптимизатору лучше оценивать количество строк и выбирать оптимальные планы выполнения.",
+        "potential_improvement": "Улучшение точности оценок оптимизатора",
+        "implementation": "ANALYZE orders; ANALYZE users;",
+        "estimated_speedup": 5.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Использование материализованных представлений",
+        "description": "Если данные не требуются в режиме реального времени, рассмотрите использование материализованных представлений для хранения агрегированных данных. Это может значительно ускорить выполнение обоих запросов.",
+        "potential_improvement": "Ускорение выполнения запросов при повторных обращениях",
+        "implementation": "CREATE MATERIALIZED VIEW mv_orders_stats AS SELECT DATE(created_at), COUNT(*), SUM(total_amount)...",
+        "estimated_speedup": 60.0
+      }
+    ],
+    "warnings": [
+      "Потенциальная проблема с оценкой количества строк: план показывает 151 строку для первого запроса, но время выполнения 0 мс и количество обработанных строк 0 указывают на возможную неточность в оценках оптимизатора.",
+      "Отсутствие индексов приводит к полному сканированию таблиц (Seq Scan), что может быть медленным при больших объемах данных.",
+      "Во втором запросе условие WHERE содержит OR, что может привести к неэффективному использованию индексов.",
+      "Возможное дублирование операций: оба запроса фильтруют данные за последние 7 дней, но не используют общие подзапросы или CTE для избежания повторного сканирования таблицы orders."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "0560b696090cd7c4fd0cf48b1b88cc9e": {
+    "query": "\n                EXPLAIN (ANALYZE, BUFFERS) SELECT * FROM users WHERE name LIKE '%John%';\n                EXPLAIN (ANALYZE, BUFFERS) SELECT * FROM orders WHERE user_id = 1 AND total_amount > 100;\n                EXPLAIN (ANALYZE, BUFFERS) SELECT u.name, o.total_amount FROM users u\n                JOIN orders o ON u.id = o.user_id\n                WHERE u.is_active = true AND o.status = 'completed';\n                ",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 0.0,
+      "memory_usage": 0.0,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "high",
+        "priority": "high",
+        "title": "Создание индексов для ускорения фильтрации и JOIN операций",
+        "description": "Для всех трех запросов в цепочке необходимо создать индексы на часто используемые поля фильтрации и JOIN условий. Для первого запроса - индекс на поле name таблицы users, для второго - индекс на user_id и total_amount таблицы orders, для третьего - индексы на is_active (users), status (orders), и user_id (orders).",
+        "potential_improvement": "Ускорение выполнения запросов в 10-100 раз в зависимости от размера таблиц",
+        "implementation": "CREATE INDEX idx_users_name ON users(name);\nCREATE INDEX idx_orders_user_id_total_amount ON orders(user_id, total_amount);\nCREATE INDEX idx_users_is_active ON users(is_active);\nCREATE INDEX idx_orders_status ON orders(status);\nCREATE INDEX idx_orders_user_id ON orders(user_id);",
+        "estimated_speedup": 50.0
+      },
+      {
+        "type": "medium",
+        "priority": "medium",
+        "title": "Оптимизация третьего запроса с использованием индексов",
+        "description": "Третий запрос в цепочке может быть дополнительно оптимизирован за счет использования индекса, который включает все необходимые поля для выполнения запроса (covering index).",
+        "potential_improvement": "Уменьшение количества операций чтения данных с диска",
+        "implementation": "CREATE INDEX idx_orders_user_id_status_total_amount ON orders(user_id, status, total_amount);\nCREATE INDEX idx_users_id_name_is_active ON users(id, name, is_active);",
+        "estimated_speedup": 20.0
+      },
+      {
+        "type": "low",
+        "priority": "low",
+        "title": "Обновление статистики таблиц",
+        "description": "Для более точного планирования выполнения запросов рекомендуется обновить статистику таблиц users и orders.",
+        "potential_improvement": "Улучшение выбора оптимального плана выполнения запросов",
+        "implementation": "ANALYZE users;\nANALYZE orders;",
+        "estimated_speedup": 5.0
+      }
+    ],
+    "warnings": [
+      "Все три запроса в цепочке используют полное сканирование таблиц (Seq Scan), что может быть неэффективным при больших объемах данных",
+      "Отсутствие индексов на поля фильтрации и JOIN условий может привести к значительному снижению производительности",
+      "В третьем запросе отсутствует индекс на поле is_active таблицы users и на поля status и user_id таблицы orders",
+      "Возможное дублирование операций в цепочке запросов при отсутствии индексов",
+      "SELECT * в первом запросе может возвращать избыточные данные, что увеличивает объем передаваемых данных"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "edddc7203c2a4d8123d2ff5472ef2279": {
+    "query": "\n                SELECT schemaname, tablename, attname, n_distinct, correlation\n                FROM pg_stats\n                WHERE tablename IN ('users', 'orders', 'order_items')\n                ORDER BY tablename, attname;\n                SELECT indexname, tablename, indexdef\n                FROM pg_indexes\n                WHERE schemaname = 'public'\n                AND tablename IN ('users', 'orders', 'order_items');\n                SELECT relname, n_tup_ins, n_tup_upd, n_tup_del, n_live_tup, n_dead_tup\n                FROM pg_stat_user_tables\n                WHERE relname IN ('users', 'orders', 'order_items');\n                ",
+    "rewritten_query": "WITH stats AS (SELECT schemaname, tablename, attname, n_distinct, correlation FROM pg_stats WHERE schemaname = 'public' AND tablename IN ('users', 'orders', 'order_items')), indexes AS (SELECT indexname, tablename, indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename IN ('users', 'orders', 'order_items')), table_stats AS (SELECT relname, n_tup_ins, n_tup_upd, n_tup_del, n_live_tup, n_dead_tup FROM pg_stat_user_tables WHERE relname IN ('users', 'orders', 'order_items')) SELECT * FROM stats UNION ALL SELECT *, NULL::int AS n_distinct, NULL::float8 AS correlation FROM indexes UNION ALL SELECT *, NULL::text AS attname, NULL::int AS n_distinct, NULL::float8 AS correlation FROM table_stats;",
+    "resource_metrics": {
+      "cpu_usage": 5.0,
+      "memory_usage": 0.5,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 1,
+      "index_usage": 50.0,
+      "cache_hit_ratio": 95.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "query_rewrite",
+        "priority": "medium",
+        "title": "Оптимизация первого запроса к pg_stats",
+        "description": "Уточнение условий фильтрации в запросе к pg_stats",
+        "potential_improvement": "Сокращение объема данных в первом запросе уменьшит общую стоимость выполнения запросов цепочки, особенно узла сортировки и вложенных соединений.",
+        "implementation": "Добавьте фильтрацию по schemaname = 'public', чтобы сократить объем данных, которые необходимо обрабатывать. Это уменьшит количество строк, возвращаемых из pg_stats, и снизит нагрузку на сортировку и соединения.",
+        "estimated_speedup": 20.0
+      },
+      {
+        "type": "query_rewrite",
+        "priority": "medium",
+        "title": "Объединение запросов в один с использованием CTE",
+        "description": "Использование CTE (Common Table Expressions) для объединения запросов",
+        "potential_improvement": "Объединение запросов в один уменьшит общее количество операций I/O и упростит выполнение запроса, особенно если данные частично кэшированы.",
+        "implementation": "Объедините три запроса в один с использованием CTE, чтобы избежать повторного обращения к системным каталогам и упростить выполнение запроса. Это также уменьшит сетевой трафик и позволит более эффективно использовать кэширование.",
+        "estimated_speedup": 15.0
+      },
+      {
+        "type": "db_configuration",
+        "priority": "low",
+        "title": "Обновление статистики таблиц",
+        "description": "Проверка актуальности статистики в pg_statistic",
+        "potential_improvement": "Точная статистика поможет планировщику выбрать более оптимальные методы соединения и сортировки, особенно если данные в таблицах часто обновляются.",
+        "implementation": "Убедитесь, что статистика в pg_statistic актуальна. Вы можете использовать команду ANALYZE для обновления статистики таблиц users, orders и order_items. Это повысит точность оценок планировщика и может улучшить выбор оптимального плана выполнения.",
+        "estimated_speedup": 5.0
+      },
+      {
+        "type": "index",
+        "priority": "low",
+        "title": "Индекс на pg_class.oid",
+        "description": "Использование индекса на pg_class.oid, если соединения часто выполняются",
+        "potential_improvement": "Снижение стоимости соединения между pg_class и pg_statistic, особенно при частых запросах к системным каталогам.",
+        "implementation": "Если запросы к pg_class и pg_statistic выполняются часто, рассмотрите возможность создания индекса на поле oid в pg_class, если он еще не существует. Это ускорит соединения на основе oid.",
+        "estimated_speedup": 10.0
+      }
+    ],
+    "warnings": [
+      "Предупреждение: Запросы к системным каталогам (pg_stats, pg_indexes, pg_stat_user_tables) могут быть медленными при больших объемах данных или если статистика устарела. Рассмотрите возможность кэширования результатов или выполнения их в фоновом режиме.",
+      "Предупреждение: Использование UNION ALL без явного указания столбцов может привести к неочевидным проблемам совместимости. Убедитесь, что количество и типы столбцов в каждом SELECT совпадают.",
+      "Предупреждение: Поскольку запросы к системным каталогам не изменяют данные, но могут блокировать их при обновлении статистики (ANALYZE), избегайте одновременного выполнения ANALYZE и этих запросов в производственной среде."
+    ],
+    "status": "llm_analysis_ready"
+  }
+}

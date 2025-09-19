@@ -1,10 +1,12 @@
-import openai
-from typing import List, Dict, Any, Optional
-from models import OptimizationRecommendation, PriorityLevel, ResourceMetrics, LLMAnalysisResponse
-from config import settings, LLMModel
+import hashlib
 import json
 import logging
-import hashlib
+from typing import Any, Dict, List, Optional
+
+import openai
+
+from config import LLMModel, settings
+from models import LLMAnalysisResponse, OptimizationRecommendation, PriorityLevel, ResourceMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +18,7 @@ class LLMAnalyzer:
         self.selected_model = selected_model or settings.get_model_by_index(0)
         if not self.selected_model:
             raise ValueError("No LLM model available")
-        self.client = openai.AsyncOpenAI(
-            api_key=self.selected_model.api_key,
-            base_url=self.selected_model.url
-        )
+        self.client = openai.AsyncOpenAI(api_key=self.selected_model.api_key, base_url=self.selected_model.url)
         self.model = self.selected_model.model
         self._cache: Dict[str, Any] = {}
         self._cache_max_size = 10000  # Максимальный размер кэша
@@ -86,10 +85,7 @@ class LLMAnalyzer:
         Переключает на другую модель
         """
         self.selected_model = model
-        self.client = openai.AsyncOpenAI(
-            api_key=model.api_key,
-            base_url=model.url
-        )
+        self.client = openai.AsyncOpenAI(api_key=model.api_key, base_url=model.url)
         self.model = model.model
         logger.info(f"Switched to model: {model.name} ({model.model})")
 
@@ -143,51 +139,26 @@ class LLMAnalyzer:
 """
             )
 
-            # Проверяем, поддерживает ли модель структурированный вывод
-            is_openai_model = "openai.com" in self.selected_model.url or "gpt-" in self.model
-            
-            if is_openai_model:
-                # Используем структурированный вывод с Pydantic для OpenAI моделей
-                response = await self.client.beta.chat.completions.parse(
-                    model=self.model,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": (
-                                "Ты эксперт по оптимизации PostgreSQL. Анализируй SQL запросы и "
-                                "предоставляй детальные рекомендации по улучшению производительности на русском языке."
-                            ),
-                        },
-                        {"role": "user", "content": structured_prompt},
-                    ],
-                    response_format=LLMAnalysisResponse,
-                    temperature=0.1,
-                    timeout=30.0,  # 30 секунд таймаут
-                )
-                # Получаем структурированный ответ
-                analysis_result = response.choices[0].message.parsed
-                logger.info(f"LLM structured response received: {type(analysis_result)}")
-            else:
-                # Для не-OpenAI моделей также используем структурированный вывод с Pydantic
-                response = await self.client.beta.chat.completions.parse(
-                    model=self.model,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": (
-                                "Ты эксперт по оптимизации PostgreSQL. Анализируй SQL запросы и "
-                                "предоставляй детальные рекомендации по улучшению производительности на русском языке."
-                            ),
-                        },
-                        {"role": "user", "content": structured_prompt},
-                    ],
-                    response_format=LLMAnalysisResponse,
-                    temperature=0.1,
-                    timeout=30.0,  # 30 секунд таймаут
-                )
-                # Получаем структурированный ответ
-                analysis_result = response.choices[0].message.parsed
-                logger.info(f"LLM structured response received: {type(analysis_result)}")
+            # Используем структурированный вывод с Pydantic для всех моделей
+            response = await self.client.beta.chat.completions.parse(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Ты эксперт по оптимизации PostgreSQL. Анализируй SQL запросы и "
+                            "предоставляй детальные рекомендации по улучшению производительности на русском языке."
+                        ),
+                    },
+                    {"role": "user", "content": structured_prompt},
+                ],
+                response_format=LLMAnalysisResponse,
+                temperature=0.1,
+                timeout=30.0,  # 30 секунд таймаут
+            )
+            # Получаем структурированный ответ
+            analysis_result = response.choices[0].message.parsed
+            logger.info(f"LLM structured response received: {type(analysis_result)}")
 
             # Проверяем, что ответ был успешно распарсен
             if analysis_result is None:
@@ -196,14 +167,10 @@ class LLMAnalyzer:
                 return {
                     "rewritten_query": None,
                     "resource_metrics": ResourceMetrics(
-                        cpu_usage=0,
-                        memory_usage=0,
-                        disk_io=0,
-                        network_io=0,
-                        estimated_cost=0
+                        cpu_usage=0, memory_usage=0, disk_io=0, network_io=0, estimated_cost=0
                     ),
                     "recommendations": [],
-                    "warnings": ["Не удалось проанализировать запрос с помощью LLM"]
+                    "warnings": ["Не удалось проанализировать запрос с помощью LLM"],
                 }
 
             # Преобразуем в наши модели
@@ -299,7 +266,9 @@ class LLMAnalyzer:
         extract_nodes_recursive(plan)
         return nodes
 
-    def _create_analysis_prompt(self, context: Dict[str, Any], table_statistics: Optional[Dict[str, Any]] = None) -> str:
+    def _create_analysis_prompt(
+        self, context: Dict[str, Any], table_statistics: Optional[Dict[str, Any]] = None
+    ) -> str:
         """
         Создает промпт для анализа запроса
         """
@@ -315,28 +284,32 @@ class LLMAnalyzer:
 ПРИМЕЧАНИЕ: Это цепочка из {} связанных запросов.
 Анализируй их как единую логическую последовательность и давай рекомендации
 по оптимизации всей цепочки в целом.
-""".format(len(queries), context['query'], len(queries))
+""".format(
+                len(queries), context["query"], len(queries)
+            )
         else:
             query_description = """
 SQL ЗАПРОС:
 {}
-""".format(context['query'])
+""".format(
+                context["query"]
+            )
 
         # Определяем тип запроса для адаптации анализа
         query_type = context["execution_plan"].get("Query Type", "SELECT")
 
         # Формируем информацию о статистике таблиц
         table_stats_info = ""
-        if table_statistics and table_statistics.get('tables'):
+        if table_statistics and table_statistics.get("tables"):
             table_stats_info = "\n\nСТАТИСТИКА ТАБЛИЦ В БАЗЕ ДАННЫХ:\n"
-            for table_name, stats in table_statistics['tables'].items():
+            for table_name, stats in table_statistics["tables"].items():
                 table_stats_info += (
                     f"- {table_name}: {stats['live_tuples']:,} строк, "
                     f"размер {stats.get('size_pretty', 'неизвестно')}\n"
                 )
 
-            total_tuples = table_statistics.get('total_live_tuples', 0)
-            total_size = table_statistics.get('total_size_bytes', 0)
+            total_tuples = table_statistics.get("total_live_tuples", 0)
+            total_size = table_statistics.get("total_size_bytes", 0)
             table_stats_info += (
                 f"\nОБЩАЯ СТАТИСТИКА: {total_tuples:,} строк в "
                 f"{table_statistics.get('total_tables', 0)} таблицах, "
@@ -414,17 +387,19 @@ SQL ЗАПРОС:
 """.format(
             query_description,
             query_type,
-            context['total_cost'],
-            context['execution_time'],
-            context['rows'],
-            json.dumps(context['plan_nodes'], indent=2, ensure_ascii=False),
+            context["total_cost"],
+            context["execution_time"],
+            context["rows"],
+            json.dumps(context["plan_nodes"], indent=2, ensure_ascii=False),
             table_stats_info,
             "- Учитывай взаимосвязь между запросами в цепочке" if is_chain else "",
             "- Для DML запросов (INSERT/UPDATE/DELETE) обрати внимание на блокировки и производительность записи"
-            if query_type in ['INSERT', 'UPDATE', 'DELETE'] else "",
+            if query_type in ["INSERT", "UPDATE", "DELETE"]
+            else "",
             "- Обрати внимание на дублирование операций в цепочке" if is_chain else "",
             "- Для DML запросов предупреди о потенциальных блокировках таблиц"
-            if query_type in ['INSERT', 'UPDATE', 'DELETE'] else ""
+            if query_type in ["INSERT", "UPDATE", "DELETE"]
+            else "",
         )
 
     async def test_connection(self) -> bool:

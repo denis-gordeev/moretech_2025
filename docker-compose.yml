@@ -28,12 +28,12 @@ services:
     environment:
       # Database Configuration
       - DATABASE_URL=${DATABASE_URL:-postgresql://analyzer_user:analyzer_pass@postgres:5432/query_analyzer}
-      
+
       # LLM Configuration (Primary)
       - LLM_API_KEY=${LLM_API_KEY}
       - LLM_MODEL=${LLM_MODEL}
       - LLM_URL=${LLM_URL}
-      
+
       # Additional LLM Models
       - LLM_API_KEY_1=${LLM_API_KEY_1}
       - LLM_MODEL_1=${LLM_MODEL_1}
@@ -50,11 +50,20 @@ services:
       - LLM_API_KEY_5=${LLM_API_KEY_5}
       - LLM_MODEL_5=${LLM_MODEL_5}
       - LLM_URL_5=${LLM_URL_5}
-      
+      - LLM_API_KEY_6=${LLM_API_KEY_6}
+      - LLM_MODEL_6=${LLM_MODEL_6}
+      - LLM_URL_6=${LLM_URL_6}
+      - LLM_API_KEY_7=${LLM_API_KEY_7}
+      - LLM_MODEL_7=${LLM_MODEL_7}
+      - LLM_URL_7=${LLM_URL_7}
+      - LLM_API_KEY_8=${LLM_API_KEY_8}
+      - LLM_MODEL_8=${LLM_MODEL_8}
+      - LLM_URL_8=${LLM_URL_8}
+
       # Application Configuration
       - DEBUG=${DEBUG:-false}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000, http://193.246.150.25:3000}
-      
+
       # Analysis Configuration
       - MAX_QUERY_LENGTH=${MAX_QUERY_LENGTH:-10000}
       - ANALYSIS_TIMEOUT=${ANALYSIS_TIMEOUT:-30}
