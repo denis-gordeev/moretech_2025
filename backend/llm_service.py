@@ -140,25 +140,89 @@ class LLMAnalyzer:
             )
 
             # Используем структурированный вывод с Pydantic для всех моделей
-            response = await self.client.beta.chat.completions.parse(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Ты эксперт по оптимизации PostgreSQL. Анализируй SQL запросы и "
-                            "предоставляй детальные рекомендации по улучшению производительности на русском языке."
-                        ),
-                    },
-                    {"role": "user", "content": structured_prompt},
-                ],
-                response_format=LLMAnalysisResponse,
-                temperature=0.1,
-                timeout=30.0,  # 30 секунд таймаут
-            )
-            # Получаем структурированный ответ
-            analysis_result = response.choices[0].message.parsed
-            logger.info(f"LLM structured response received: {type(analysis_result)}")
+            try:
+                response = await self.client.beta.chat.completions.parse(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Ты эксперт по оптимизации PostgreSQL. Анализируй SQL запросы и "
+                                "предоставляй детальные рекомендации по улучшению производительности на русском языке."
+                            ),
+                        },
+                        {"role": "user", "content": structured_prompt},
+                    ],
+                    response_format=LLMAnalysisResponse,
+                    temperature=0.1,
+                    timeout=30.0,  # 30 секунд таймаут
+                )
+                # Получаем структурированный ответ
+                analysis_result = response.choices[0].message.parsed
+                logger.info(f"LLM structured response received: {type(analysis_result)}")
+            except Exception as parse_error:
+                logger.error(f"LLM structured parsing failed, attempting fallbacks: {parse_error}")
+                # Попытка 1: запросить JSON-объект напрямую
+                content = None
+                try:
+                    raw_resp = await self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    "Ты эксперт по оптимизации PostgreSQL. Отвечай ТОЛЬКО валидным JSON-объектом, "
+                                    "без markdown, без комментариев. Ключи: rewritten_query (string|null), "
+                                    "resource_metrics (object), recommendations (array), warnings (array)."
+                                ),
+                            },
+                            {"role": "user", "content": structured_prompt + "\n\nОтветь ТОЛЬКО JSON."},
+                        ],
+                        temperature=0.1,
+                        max_tokens=800,
+                        response_format={"type": "json_object"},
+                    )
+                    content = raw_resp.choices[0].message.content if raw_resp and raw_resp.choices else None
+                except Exception as json_object_error:
+                    logger.error(f"JSON-object response_format fallback failed: {json_object_error}")
+                    # Попытка 2: обычный ответ, попробуем извлечь JSON вручную
+                    try:
+                        raw_resp2 = await self.client.chat.completions.create(
+                            model=self.model,
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        "Ты эксперт по оптимизации PostgreSQL. Верни ТОЛЬКО JSON, без markdown."
+                                    ),
+                                },
+                                {"role": "user", "content": structured_prompt + "\n\nВерни только JSON, без текста."},
+                            ],
+                            temperature=0.1,
+                            max_tokens=1000,
+                        )
+                        content = raw_resp2.choices[0].message.content if raw_resp2 and raw_resp2.choices else None
+                    except Exception as plain_fallback_error:
+                        logger.error(f"Plain completion fallback failed: {plain_fallback_error}")
+
+                if content:
+                    # Пытаемся очистить и распарсить JSON вручную
+                    try:
+                        cleaned = self._clean_json_from_markdown(content)
+                        data = json.loads(cleaned)
+                        # Маппим распарсенный JSON в итоговый результат
+                        result = self._map_json_to_result(data)
+                        # Сохраняем в кэш и возвращаем
+                        self._add_to_cache(query_hash, result)
+                        return result
+                    except Exception as manual_parse_error:
+                        logger.error(f"Manual JSON parse failed: {manual_parse_error}")
+                        # Продолжим к построению безопасного результата ниже
+                # Если все попытки провалились, вернем безопасный результат
+                return self._build_fallback_result(
+                    reason="LLM вернул не-JSON или парсинг не удался",
+                    original_content=(content[:500] if content else None),
+                )
 
             # Проверяем, что ответ был успешно распарсен
             if analysis_result is None:
@@ -224,7 +288,123 @@ class LLMAnalyzer:
 
         except Exception as e:
             logger.error(f"LLM analysis error: {e}")
-            raise
+            # Возвращаем безопасный результат вместо исключения, чтобы не ронять API
+            return self._build_fallback_result(reason=str(e))
+
+    def _clean_json_from_markdown(self, content: str) -> str:
+        """Удаляет markdown-ограждения и извлекает JSON-объект/массив из текста."""
+        import re
+        if not content:
+            return content
+        # Удаляем кодовые блоки ```json ... ``` и ``` ... ```
+        content = re.sub(r"```json\s*\n?", "", content, flags=re.IGNORECASE)
+        content = re.sub(r"```\s*\n?$", "", content, flags=re.MULTILINE)
+        content = re.sub(r"^```\s*\n?", "", content, flags=re.MULTILINE)
+        content = content.strip()
+        # Находим первый JSON-объект или массив
+        json_match = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", content)
+        if json_match:
+            json_content = json_match.group(1)
+            json_content = re.sub(r"```.*?$", "", json_content, flags=re.MULTILINE)
+            return json_content.strip()
+        return content
+
+    def _map_json_to_result(self, data: Any) -> Dict[str, Any]:
+        """Преобразует JSON (словарь или объект с ключами) к формату результата API."""
+        # Если верхний уровень — массив с одним объектом
+        if isinstance(data, list) and data:
+            data = data[0]
+        if not isinstance(data, dict):
+            raise ValueError("Parsed JSON is not an object")
+
+        # Распаковываем поля с дефолтами
+        rewritten_query = data.get("rewritten_query")
+        rm = data.get("resource_metrics", {}) or {}
+        recs = data.get("recommendations", []) or []
+        warns = data.get("warnings", []) or []
+
+        # Нормализуем метрики ресурсов
+        resource_metrics = {
+            "cpu_usage": float(rm.get("cpu_usage", 0) or 0),
+            "memory_usage": float(rm.get("memory_usage", 0) or 0),
+            "io_operations": int(rm.get("io_operations", 0) or 0),
+            "disk_reads": int(rm.get("disk_reads", 0) or 0),
+            "disk_writes": int(rm.get("disk_writes", 0) or 0),
+            "disk_io": float(rm.get("disk_io", rm.get("disk_io_mb", 0) or 0) or 0),
+            "network_io": float(rm.get("network_io", 0) or 0),
+            "execution_time": float(rm.get("execution_time", 0) or 0),
+            "rows_processed": int(rm.get("rows_processed", 0) or 0),
+            "index_usage": float(rm.get("index_usage", 0) or 0),
+            "cache_hit_ratio": float(rm.get("cache_hit_ratio", 0) or 0),
+            "lock_contention": float(rm.get("lock_contention", 0) or 0),
+        }
+
+        # Нормализуем рекомендации
+        normalized_recs = []
+        for r in recs:
+            if not isinstance(r, dict):
+                continue
+            priority = str(r.get("priority", "medium")).lower()
+            if priority not in ("high", "medium", "low"):
+                priority = "medium"
+            est = r.get("estimated_speedup")
+            try:
+                if isinstance(est, str) and "-" in est:
+                    parts = est.split("-")
+                    if len(parts) == 2:
+                        est = (float(parts[0]) + float(parts[1])) / 2
+                elif est is not None:
+                    est = float(est)
+            except Exception:
+                est = None
+            normalized_recs.append(
+                {
+                    "type": r.get("type", "general"),
+                    "priority": priority,
+                    "title": r.get("title", ""),
+                    "description": r.get("description", ""),
+                    "potential_improvement": r.get("potential_improvement", ""),
+                    "implementation": r.get("implementation", ""),
+                    "estimated_speedup": est,
+                }
+            )
+
+        # Гарантируем, что warnings — список строк
+        if isinstance(warns, str):
+            warns = [warns]
+
+        return {
+            "rewritten_query": rewritten_query,
+            "resource_metrics": resource_metrics,
+            "recommendations": normalized_recs,
+            "warnings": warns,
+        }
+
+    def _build_fallback_result(self, reason: str, original_content: Optional[str] = None) -> Dict[str, Any]:
+        """Строит безопасный результат при ошибке LLM/парсинга, чтобы не возвращать 500."""
+        warning_msg = "LLM вернул невалидный ответ. Выполнен безопасный возврат без переписывания запроса."
+        details = f"Причина: {reason}"
+        if original_content:
+            details += "; фрагмент ответа: " + original_content
+        return {
+            "rewritten_query": None,
+            "resource_metrics": {
+                "cpu_usage": 0,
+                "memory_usage": 0,
+                "io_operations": 0,
+                "disk_reads": 0,
+                "disk_writes": 0,
+                "disk_io": 0,
+                "network_io": 0,
+                "execution_time": 0,
+                "rows_processed": 0,
+                "index_usage": 0,
+                "cache_hit_ratio": 0,
+                "lock_contention": 0,
+            },
+            "recommendations": [],
+            "warnings": [warning_msg, details],
+        }
 
     def _prepare_analysis_context(self, query: str, execution_plan: Dict[str, Any]) -> Dict[str, Any]:
         """
