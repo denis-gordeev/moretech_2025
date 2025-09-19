@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import asyncio
+import inspect
 from datetime import datetime
 
 from models import QueryAnalysisRequest, QueryAnalysis, ExecutionPlan, HealthCheck, DatabaseConfig
@@ -24,6 +25,16 @@ from config import settings
 # Security module removed - allowing all database connections
 from database_profiles import profile_manager, DatabaseProfile
 from execution_plan_cache import ExecutionPlanCache
+from services.query_analysis import (
+    QueryAnalysisError,
+    build_execution_plan_model,
+    determine_llm_query,
+    extract_main_query,
+    fetch_execution_plan,
+    refined_rewritten_query,
+    resolve_analyzer,
+    validate_query_text,
+)
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -57,6 +68,18 @@ execution_plan_cache = ExecutionPlanCache()
 
 # Глобальная переменная для хранения статистики таблиц
 table_statistics = {}
+
+
+async def run_with_timeout(description: str, awaitable, timeout: float = 5.0) -> bool:
+    """Run an awaitable with a timeout, gracefully handling sync results."""
+    try:
+        if not inspect.isawaitable(awaitable):
+            return bool(awaitable)
+
+        return await asyncio.wait_for(awaitable, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning("%s timed out after %.1fs", description, timeout)
+        return False
 
 
 async def create_default_database_profiles():
@@ -194,8 +217,8 @@ async def startup_event():
 
     # Проверяем подключения
     try:
-        db_connected = await db_analyzer.test_connection()
-        openai_available = await llm_analyzer.test_connection()
+        db_connected = await run_with_timeout("Database connection test", db_analyzer.test_connection())
+        openai_available = await run_with_timeout("LLM connection test", llm_analyzer.test_connection())
 
         if db_connected and openai_available:
             # Создаём профили по умолчанию для баз данных
@@ -303,8 +326,8 @@ async def root():
 async def health_check():
     """Проверка здоровья сервиса"""
     try:
-        db_connected = await db_analyzer.test_connection()
-        openai_available = await llm_analyzer.test_connection()
+        db_connected = await run_with_timeout("Database connection test", db_analyzer.test_connection())
+        openai_available = await run_with_timeout("LLM connection test", llm_analyzer.test_connection())
 
         status = "healthy" if db_connected and openai_available else "unhealthy"
 
@@ -379,121 +402,52 @@ async def analyze_query(request: QueryAnalysisRequest):
     Анализирует SQL запрос и возвращает рекомендации по оптимизации
     """
     try:
-        # Валидация запроса
-        if len(request.query.strip()) == 0:
-            raise HTTPException(status_code=400, detail="Query cannot be empty")
+        validate_query_text(request.query, max_length=settings.max_query_length)
 
-        if len(request.query) > settings.max_query_length:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Query too long. Maximum length is {settings.max_query_length} characters"
-            )
-
-        # SQL security check removed - allowing all queries
-
-        # Используем переданный URL БД или дефолтный
-        analyzer = db_analyzer
-        if request.database_url:
-            # Database URL validation removed - allowing all connections
-            safe_url = request.database_url.replace("://", "://***:***@") if "://" in request.database_url else request.database_url
-            logger.info(f"Using custom database: {safe_url}")
-            analyzer = PostgreSQLAnalyzer(request.database_url)
-        elif hasattr(request, 'database_profile_id') and request.database_profile_id:
-            # Использование профиля базы данных
-            connection = profile_manager.get_connection(request.database_profile_id)
-            if not connection:
-                raise HTTPException(
-                    status_code=400, 
-                    detail="Database profile not found or connection expired"
-                )
-            
-            profile_manager.update_last_used(request.database_profile_id)
-            analyzer = PostgreSQLAnalyzer(connection.get_connection_url())
-
-        # Проверяем, является ли запрос цепочкой (содержит точку с запятой)
-        queries = [q.strip() for q in request.query.split(";") if q.strip()]
-
-        if len(queries) > 1:
-            logger.info(f"Analyzing query chain with {len(queries)} queries...")
-            # Для цепочки запросов анализируем первый запрос как основной
-            main_query = queries[0]
-            all_queries_text = request.query
-        else:
-            logger.info(f"Analyzing single query: {request.query[:100]}...")
-            main_query = request.query
-            all_queries_text = request.query
-
-        # Получаем план выполнения для основного запроса (с кэшированием)
-        database_url = analyzer.database_url
-        
-        # Проверяем кэш планов выполнения
-        cached_plan = execution_plan_cache.get_plan(main_query, database_url)
-        if cached_plan:
-            logger.info("Using cached execution plan")
-            plan_data = cached_plan
-        else:
-            logger.info("Generating new execution plan")
-            plan_data = await analyzer.analyze_query_performance(main_query)
-            # Сохраняем план в кэш
-            execution_plan_cache.set_plan(main_query, database_url, plan_data)
-
-        # Создаем объект плана выполнения
-        execution_plan = ExecutionPlan(
-            total_cost=plan_data["total_cost"],
-            execution_time=plan_data["execution_time"],
-            rows=plan_data["rows"],
-            width=plan_data["width"],
-            plan_json=plan_data["plan_json"],
+        resolution = resolve_analyzer(
+            database_url=request.database_url,
+            database_profile_id=getattr(request, "database_profile_id", None),
+            default_analyzer=db_analyzer,
+            profile_manager=profile_manager,
         )
 
-        # Анализируем с помощью LLM (передаем только оригинальный запрос)
+        main_query, all_queries_text = extract_main_query(request.query)
+        plan_data, _ = await fetch_execution_plan(
+            analyzer=resolution.analyzer,
+            main_query=main_query,
+            plan_cache=execution_plan_cache,
+        )
+
+        execution_plan_payload = build_execution_plan_model(plan_data)
+        execution_plan = ExecutionPlan(**execution_plan_payload)
+
         logger.info("Running LLM analysis...")
         global table_statistics
-        
-        # LLM всегда получает оригинальный запрос для правильного контекста
-        query_for_llm = all_queries_text
-        if "Converted Query" in plan_data["plan_json"]:
-            original_query = plan_data["plan_json"].get("Converted From", all_queries_text)
-            query_for_llm = original_query
-            logger.info(f"LLM will analyze original query: {original_query[:100]}...")
-        else:
-            logger.info(f"LLM will analyze query: {query_for_llm[:100]}...")
-        
+        query_for_llm = determine_llm_query(plan_data["plan_json"], all_queries_text)
         llm_result = await llm_analyzer.analyze_query_with_llm(
             query_for_llm, plan_data["plan_json"], table_statistics
         )
 
-        # Проверяем, нужно ли показывать rewritten_query
-        rewritten_query = llm_result.get("rewritten_query")
-        warnings = llm_result.get("warnings", [])
-        
-        # Показываем переписанный запрос только если:
-        # 1. Есть предупреждения (warnings)
-        # 2. Переписанный запрос отличается от оригинального
-        if rewritten_query and rewritten_query.strip() == request.query.strip():
-            # Если переписанный запрос совпадает с оригинальным, не показываем его
-            rewritten_query = None
-            logger.info("Rewritten query is identical to original, hiding from frontend")
-        elif rewritten_query and not warnings:
-            # Если нет предупреждений, не показываем переписанный запрос
-            rewritten_query = None
-            logger.info("No warnings found, hiding rewritten query from frontend")
-        elif rewritten_query and warnings:
-            logger.info(f"Showing rewritten query due to {len(warnings)} warnings")
-        
-        # Создаем результат анализа
+        rewritten_query = refined_rewritten_query(
+            request_query=request.query,
+            warnings=llm_result.get("warnings"),
+            rewritten_query=llm_result.get("rewritten_query"),
+        )
+
         analysis = QueryAnalysis(
             query=request.query,
             rewritten_query=rewritten_query,
             execution_plan=execution_plan,
             resource_metrics=llm_result["resource_metrics"],
             recommendations=llm_result["recommendations"],
-            warnings=llm_result["warnings"],
+            warnings=llm_result.get("warnings", []),
         )
 
-        logger.info(f"Analysis completed. Found {len(analysis.recommendations)} recommendations")
+        logger.info("Analysis completed. Found %s recommendations", len(analysis.recommendations))
         return analysis
 
+    except QueryAnalysisError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     except HTTPException:
         raise
     except Exception as e:
@@ -507,77 +461,33 @@ async def analyze_execution_plan(request: QueryAnalysisRequest):
     Возвращает только план выполнения запроса (быстрый ответ)
     """
     try:
-        # Валидация запроса
-        if len(request.query.strip()) == 0:
-            raise HTTPException(status_code=400, detail="Query cannot be empty")
+        validate_query_text(request.query, max_length=settings.max_query_length)
 
-        if len(request.query) > settings.max_query_length:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Query too long. Maximum length is {settings.max_query_length} characters"
-            )
-
-        # Используем переданный URL БД или дефолтный
-        analyzer = db_analyzer
-        if request.database_url:
-            safe_url = request.database_url.replace("://", "://***:***@") if "://" in request.database_url else request.database_url
-            logger.info(f"Using custom database: {safe_url}")
-            analyzer = PostgreSQLAnalyzer(request.database_url)
-        elif hasattr(request, 'database_profile_id') and request.database_profile_id:
-            # Использование профиля базы данных
-            connection = profile_manager.get_connection(request.database_profile_id)
-            if not connection:
-                raise HTTPException(
-                    status_code=400, 
-                    detail="Database profile not found or connection expired"
-                )
-            
-            profile_manager.update_last_used(request.database_profile_id)
-            analyzer = PostgreSQLAnalyzer(connection.get_connection_url())
-
-        # Проверяем, является ли запрос цепочкой (содержит точку с запятой)
-        queries = [q.strip() for q in request.query.split(";") if q.strip()]
-
-        if len(queries) > 1:
-            logger.info(f"Analyzing query chain with {len(queries)} queries...")
-            # Для цепочки запросов анализируем первый запрос как основной
-            main_query = queries[0]
-            all_queries_text = request.query
-        else:
-            logger.info(f"Analyzing single query: {request.query[:100]}...")
-            main_query = request.query
-            all_queries_text = request.query
-
-        # Получаем план выполнения для основного запроса (с кэшированием)
-        database_url = analyzer.database_url
-        
-        # Проверяем кэш планов выполнения
-        cached_plan = execution_plan_cache.get_plan(main_query, database_url)
-        if cached_plan:
-            logger.info("Using cached execution plan")
-            plan_data = cached_plan
-        else:
-            logger.info("Generating new execution plan")
-            plan_data = await analyzer.analyze_query_performance(main_query)
-            # Сохраняем план в кэш
-            execution_plan_cache.set_plan(main_query, database_url, plan_data)
-
-        # Создаем объект плана выполнения
-        execution_plan = ExecutionPlan(
-            total_cost=plan_data["total_cost"],
-            execution_time=plan_data["execution_time"],
-            rows=plan_data["rows"],
-            width=plan_data["width"],
-            plan_json=plan_data["plan_json"],
+        resolution = resolve_analyzer(
+            database_url=request.database_url,
+            database_profile_id=getattr(request, "database_profile_id", None),
+            default_analyzer=db_analyzer,
+            profile_manager=profile_manager,
         )
 
-        # Возвращаем только план выполнения
+        main_query, _ = extract_main_query(request.query)
+        plan_data, _ = await fetch_execution_plan(
+            analyzer=resolution.analyzer,
+            main_query=main_query,
+            plan_cache=execution_plan_cache,
+        )
+
+        execution_plan_payload = build_execution_plan_model(plan_data)
+        execution_plan = ExecutionPlan(**execution_plan_payload)
+
         return {
             "query": request.query,
             "execution_plan": execution_plan,
             "status": "execution_plan_ready"
         }
 
+    except QueryAnalysisError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     except HTTPException:
         raise
     except Exception as e:
@@ -591,105 +501,46 @@ async def analyze_with_llm(request: QueryAnalysisRequest):
     Возвращает только LLM анализ запроса (использует кэшированный план выполнения)
     """
     try:
-        # Валидация запроса
-        if len(request.query.strip()) == 0:
-            raise HTTPException(status_code=400, detail="Query cannot be empty")
+        validate_query_text(request.query, max_length=settings.max_query_length)
 
-        if len(request.query) > settings.max_query_length:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Query too long. Maximum length is {settings.max_query_length} characters"
-            )
+        resolution = resolve_analyzer(
+            database_url=request.database_url,
+            database_profile_id=getattr(request, "database_profile_id", None),
+            default_analyzer=db_analyzer,
+            profile_manager=profile_manager,
+        )
 
-        # Используем переданный URL БД или дефолтный
-        analyzer = db_analyzer
-        if request.database_url:
-            safe_url = request.database_url.replace("://", "://***:***@") if "://" in request.database_url else request.database_url
-            logger.info(f"Using custom database: {safe_url}")
-            analyzer = PostgreSQLAnalyzer(request.database_url)
-        elif hasattr(request, 'database_profile_id') and request.database_profile_id:
-            # Использование профиля базы данных
-            connection = profile_manager.get_connection(request.database_profile_id)
-            if not connection:
-                raise HTTPException(
-                    status_code=400, 
-                    detail="Database profile not found or connection expired"
-                )
-            
-            profile_manager.update_last_used(request.database_profile_id)
-            analyzer = PostgreSQLAnalyzer(connection.get_connection_url())
+        main_query, all_queries_text = extract_main_query(request.query)
+        plan_data, _ = await fetch_execution_plan(
+            analyzer=resolution.analyzer,
+            main_query=main_query,
+            plan_cache=execution_plan_cache,
+        )
 
-        # Проверяем, является ли запрос цепочкой (содержит точку с запятой)
-        queries = [q.strip() for q in request.query.split(";") if q.strip()]
-
-        if len(queries) > 1:
-            logger.info(f"Analyzing query chain with {len(queries)} queries...")
-            # Для цепочки запросов анализируем первый запрос как основной
-            main_query = queries[0]
-            all_queries_text = request.query
-        else:
-            logger.info(f"Analyzing single query: {request.query[:100]}...")
-            main_query = request.query
-            all_queries_text = request.query
-
-        # Получаем план выполнения (должен быть уже в кэше)
-        database_url = analyzer.database_url
-        cached_plan = execution_plan_cache.get_plan(main_query, database_url)
-        
-        if not cached_plan:
-            # Если план не в кэше, генерируем его
-            logger.info("Execution plan not in cache, generating...")
-            plan_data = await analyzer.analyze_query_performance(main_query)
-            execution_plan_cache.set_plan(main_query, database_url, plan_data)
-        else:
-            logger.info("Using cached execution plan for LLM analysis")
-            plan_data = cached_plan
-
-        # Анализируем с помощью LLM
         logger.info("Running LLM analysis...")
         global table_statistics
-        
-        # LLM всегда получает оригинальный запрос для правильного контекста
-        query_for_llm = all_queries_text
-        if "Converted Query" in plan_data["plan_json"]:
-            original_query = plan_data["plan_json"].get("Converted From", all_queries_text)
-            query_for_llm = original_query
-            logger.info(f"LLM will analyze original query: {original_query[:100]}...")
-        else:
-            logger.info(f"LLM will analyze query: {query_for_llm[:100]}...")
-        
+        query_for_llm = determine_llm_query(plan_data["plan_json"], all_queries_text)
         llm_result = await llm_analyzer.analyze_query_with_llm(
             query_for_llm, plan_data["plan_json"], table_statistics
         )
 
-        # Проверяем, нужно ли показывать rewritten_query
-        rewritten_query = llm_result.get("rewritten_query")
-        warnings = llm_result.get("warnings", [])
-        
-        # Показываем переписанный запрос только если:
-        # 1. Есть предупреждения (warnings)
-        # 2. Переписанный запрос отличается от оригинального
-        if rewritten_query and rewritten_query.strip() == request.query.strip():
-            # Если переписанный запрос совпадает с оригинальным, не показываем его
-            rewritten_query = None
-            logger.info("Rewritten query is identical to original, hiding from frontend")
-        elif rewritten_query and not warnings:
-            # Если нет предупреждений, не показываем переписанный запрос
-            rewritten_query = None
-            logger.info("No warnings found, hiding rewritten query from frontend")
-        elif rewritten_query and warnings:
-            logger.info(f"Showing rewritten query due to {len(warnings)} warnings")
+        rewritten_query = refined_rewritten_query(
+            request_query=request.query,
+            warnings=llm_result.get("warnings"),
+            rewritten_query=llm_result.get("rewritten_query"),
+        )
 
-        # Возвращаем только LLM анализ
         return {
             "query": request.query,
             "rewritten_query": rewritten_query,
             "resource_metrics": llm_result["resource_metrics"],
             "recommendations": llm_result["recommendations"],
-            "warnings": llm_result["warnings"],
+            "warnings": llm_result.get("warnings", []),
             "status": "llm_analysis_ready"
         }
 
+    except QueryAnalysisError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     except HTTPException:
         raise
     except Exception as e:
