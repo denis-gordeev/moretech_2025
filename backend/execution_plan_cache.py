@@ -4,6 +4,9 @@ import logging
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 
+_BASE_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_CACHE_DIR = _BASE_DIR / "cache"
+
 logger = logging.getLogger(__name__)
 
 
@@ -13,11 +16,11 @@ class ExecutionPlanCache:
     def __init__(self, cache_dir: Optional[Path] = None):
         self._cache: Dict[str, Any] = {}
         self._cache_max_size = 1000  # Максимальный размер кэша планов
-        self._cache_dir = cache_dir or Path("/app/cache")
+        self._cache_dir = (cache_dir or DEFAULT_CACHE_DIR).resolve()
         self._cache_file = self._cache_dir / "execution_plans.json"
         
         # Создаем директорию если не существует
-        self._cache_dir.mkdir(exist_ok=True)
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
         
         # Загружаем кэш из файла при инициализации
         self._load_from_file()
