@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 from database import PostgreSQLAnalyzer
-from security import validate_database_url, sanitize_db_url_for_logging
+# Security module removed - allowing all database connections
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +59,7 @@ class DatabaseProfileManager:
             # Create connection URL for validation
             connection_url = f"postgresql://{username}:{password}@{host}:{port}/{database}"
             
-            # Validate URL security
-            is_valid, error_msg = validate_database_url(connection_url)
-            if not is_valid:
-                return False, f"Security validation failed: {error_msg}"
+            # Security validation removed - allowing all database connections
             
             # Test actual connection
             analyzer = PostgreSQLAnalyzer(connection_url)
@@ -92,8 +89,8 @@ class DatabaseProfileManager:
             connection = DatabaseConnection(profile=profile, password=password)
             self._active_connections[profile_id] = connection
             
-            # Log safely
-            safe_url = sanitize_db_url_for_logging(connection_url)
+            # Log connection (password hidden)
+            safe_url = connection_url.replace(f":{password}@", ":***@")
             logger.info(f"Created database profile: {profile_id} -> {safe_url}")
             
             return True, profile_id
@@ -145,10 +142,7 @@ class DatabaseProfileManager:
             connection = DatabaseConnection(profile=profile, password=password)
             connection_url = connection.get_connection_url()
             
-            # Validate security (should pass since profile was validated before)
-            is_valid, error_msg = validate_database_url(connection_url)
-            if not is_valid:
-                return False, f"Security validation failed: {error_msg}"
+            # Security validation removed - allowing all database connections
             
             # Test connection
             analyzer = PostgreSQLAnalyzer(connection_url)

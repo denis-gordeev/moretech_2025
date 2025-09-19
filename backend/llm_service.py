@@ -22,7 +22,7 @@ class LLMAnalyzer:
         )
         self.model = self.selected_model.model
         self._cache: Dict[str, Any] = {}
-        self._cache_max_size = 100  # Максимальный размер кэша
+        self._cache_max_size = 10000  # Максимальный размер кэша
         self._session = None
 
     def _create_query_hash(self, query: str, execution_plan: Dict[str, Any]) -> str:
@@ -73,6 +73,14 @@ class LLMAnalyzer:
         self._cache.clear()
         logger.info("Cache cleared")
 
+    async def load_cache_from_file(self, cache_data: Dict[str, Any]) -> None:
+        """
+        Загружает кэш из внешнего источника (например, из файла)
+        """
+        if cache_data:
+            self._cache.update(cache_data)
+            logger.info(f"Loaded {len(cache_data)} entries from external cache")
+
     def switch_model(self, model: LLMModel) -> None:
         """
         Переключает на другую модель
@@ -113,16 +121,15 @@ class LLMAnalyzer:
                 prompt
                 + """
 
-ВАЖНО: Поле "rewritten_query" должно содержать оптимизированную версию SQL запроса,
-если это необходимо для улучшения производительности.
+ВАЖНО: Поле "rewritten_query" должно содержать оптимизированную версию SQL запроса
+ТОЛЬКО если есть серьезные проблемы с производительностью или структурой запроса.
 
-Для DML запросов (INSERT/UPDATE/DELETE):
-- Анализируй производительность WHERE условий и JOIN'ов
-- Предлагай оптимизации для поиска и фильтрации данных
-- Сохраняй структуру DML запроса (INSERT/UPDATE/DELETE) в переписанном запросе
-- Для INSERT запросов оптимизируй SELECT часть, но сохраняй INSERT INTO структуру
+Переписывай запрос ТОЛЬКО в следующих случаях:
+- Есть предупреждения (warnings) о проблемах с запросом
+- Запрос содержит неэффективные конструкции
+- Есть явные проблемы с производительностью
 
-Примеры случаев, когда нужно переписать запрос:
+Примеры случаев, когда НУЖНО переписать запрос:
 - Неявный JOIN (через запятую) → явный JOIN
 - Подзапросы, которые можно заменить на JOIN
 - NOT IN → NOT EXISTS или LEFT JOIN
@@ -130,7 +137,7 @@ class LLMAnalyzer:
 - Отсутствие LIMIT в запросах с большим результатом
 - Неоптимальные индексы для WHERE условий
 
-Если запрос уже оптимален или переписывание не требуется, укажи null.
+Если запрос уже оптимален или нет серьезных проблем, укажи null в поле "rewritten_query".
 
 Все тексты должны быть на русском языке.
 """
@@ -156,6 +163,51 @@ class LLMAnalyzer:
             # Получаем структурированный ответ
             analysis_result = response.choices[0].message.parsed
             logger.info(f"LLM structured response received: {type(analysis_result)}")
+
+            # Проверяем, что ответ был успешно распарсен
+            if analysis_result is None:
+                logger.error("LLM response parsing failed - received None")
+                # Попробуем получить raw content и очистить его
+                raw_content = response.choices[0].message.content
+                if raw_content:
+                    logger.info("Attempting to parse raw LLM content")
+                    # Удаляем markdown код блоки если есть
+                    cleaned_content = raw_content.replace('```json', '').replace('```', '').strip()
+                    try:
+                        import json
+                        parsed_data = json.loads(cleaned_content)
+                        # Создаем временный объект для совместимости
+                        analysis_result = type('AnalysisResult', (), parsed_data)()
+                        logger.info("Successfully parsed raw LLM content")
+                    except Exception as json_error:
+                        logger.error(f"Failed to parse raw LLM content: {json_error}")
+                        # Возвращаем базовый результат в случае ошибки парсинга
+                        return {
+                            "rewritten_query": None,
+                            "resource_metrics": ResourceMetrics(
+                                cpu_usage=0,
+                                memory_usage=0,
+                                disk_io=0,
+                                network_io=0,
+                                estimated_cost=0
+                            ),
+                            "recommendations": [],
+                            "warnings": ["Не удалось проанализировать запрос с помощью LLM"]
+                        }
+                else:
+                    # Возвращаем базовый результат в случае ошибки парсинга
+                    return {
+                        "rewritten_query": None,
+                        "resource_metrics": ResourceMetrics(
+                            cpu_usage=0,
+                            memory_usage=0,
+                            disk_io=0,
+                            network_io=0,
+                            estimated_cost=0
+                        ),
+                        "recommendations": [],
+                        "warnings": ["Не удалось проанализировать запрос с помощью LLM"]
+                    }
 
             # Преобразуем в наши модели
             recommendations = []
@@ -308,6 +360,35 @@ SQL ЗАПРОС:
 
 УЗЛЫ ПЛАНА:
 {}{}
+
+ПРИМЕРЫ АНАЛИЗА (для справки):
+
+Пример 1 - Простой SELECT:
+Запрос: SELECT * FROM users WHERE email = 'john@example.com'
+Рекомендации:
+- Проверка полноты индекса: Индекс idx_users_email уже используется, но для максимальной производительности убедитесь, что он покрывающий (covering index)
+- Обновление статистики таблицы: Статистика показывает только 3 строки в таблице users, но размер 56kB указывает на возможное несоответствие. Обновите статистику для более точного планирования
+Предупреждения:
+- Внимание: Размер таблицы users (56kB) не соответствует заявленному количеству строк (3). Возможно устаревшая статистика
+- Предупреждение: SELECT * может возвращать избыточные данные. Рекомендуется явно указывать необходимые столбцы
+
+Пример 2 - JOIN с агрегацией:
+Запрос: SELECT u.name, COUNT(o.id) as order_count, SUM(o.total_amount) as total_spent FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE u.is_active = true GROUP BY u.id, u.name ORDER BY total_spent DESC
+Рекомендации:
+- Создание индекса для users.is_active: Добавить индекс на поле is_active таблицы users для ускорения фильтрации активных пользователей
+- Создание индекса для orders.user_id: Добавить индекс на поле user_id таблицы orders для оптимизации JOIN операции
+Предупреждения:
+- Потенциальная проблема с оценкой количества строк: план показывает 85 строк для users, но статистика указывает только 3 строки
+- Отсутствие индексов приводит к полному сканированию таблиц (Seq Scan)
+
+Пример 3 - Сложный подзапрос:
+Запрос: SELECT * FROM users WHERE id IN (SELECT user_id FROM orders WHERE total_amount > (SELECT AVG(total_amount) FROM orders))
+Рекомендации:
+- Создание индекса для orders.total_amount: Добавить индекс на поле total_amount таблицы orders для ускорения вычисления среднего значения
+- Создание индекса для orders.user_id: Добавить индекс на поле user_id таблицы orders для ускорения JOIN операций
+Предупреждения:
+- Использование последовательного сканирования (Seq Scan) вместо индексного сканирования
+- Множественные полные сканирования таблицы orders (690 и 230 строк)
 
 Пожалуйста, проанализируй:
 

@@ -15,24 +15,26 @@ function App() {
   const [query, setQuery] = useState('');
   const [analysis, setAnalysis] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingExecutionPlan, setIsLoadingExecutionPlan] = useState(false);
+  const [isLoadingLLM, setIsLoadingLLM] = useState(false);
   const [error, setError] = useState(null);
   const [examples, setExamples] = useState([]);
   const [activeTab, setActiveTab] = useState('query');
   const [currentModel, setCurrentModel] = useState(null);
   const [selectedDatabase, setSelectedDatabase] = useState(null);
 
-  // Загружаем примеры запросов при инициализации
+  // Загружаем примеры запросов при инициализации и при смене базы данных
   useEffect(() => {
     const loadExamples = async () => {
       try {
-        const response = await queryAnalyzerAPI.getExampleQueries();
+        const response = await queryAnalyzerAPI.getExampleQueries(selectedDatabase?.id);
         setExamples(response.data.examples);
       } catch (error) {
         console.error('Failed to load examples:', error);
       }
     };
     loadExamples();
-  }, []);
+  }, [selectedDatabase]);
 
   const handleAnalyze = async () => {
     if (!query.trim()) {
@@ -41,13 +43,51 @@ function App() {
     }
 
     setIsLoading(true);
+    setIsLoadingExecutionPlan(true);
+    setIsLoadingLLM(false);
     setError(null);
     setAnalysis(null);
 
     try {
-      const response = await queryAnalyzerAPI.analyzeQuery(query, selectedDatabase?.id);
-      setAnalysis(response.data);
+      // Шаг 1: Получаем план выполнения (быстрый ответ)
+      console.log('Шаг 1: Получение плана выполнения...');
+      const executionPlanResponse = await queryAnalyzerAPI.analyzeExecutionPlan(
+        query,
+        selectedDatabase?.id
+      );
+      
+      // Показываем план выполнения сразу
+      setAnalysis({
+        query: executionPlanResponse.data.query,
+        execution_plan: executionPlanResponse.data.execution_plan,
+        status: 'execution_plan_ready',
+        // Инициализируем пустые массивы для безопасности
+        recommendations: [],
+        warnings: [],
+        resource_metrics: null,
+        rewritten_query: null
+      });
       setActiveTab('results');
+      setIsLoadingExecutionPlan(false);
+      setIsLoadingLLM(true);
+
+      // Шаг 2: Получаем LLM анализ (медленный ответ)
+      console.log('Шаг 2: Получение LLM анализа...');
+      const llmResponse = await queryAnalyzerAPI.analyzeWithLLM(
+        query,
+        selectedDatabase?.id
+      );
+      
+      // Обновляем анализ с результатами LLM
+      setAnalysis(prevAnalysis => ({
+        ...prevAnalysis,
+        rewritten_query: llmResponse.data.rewritten_query,
+        resource_metrics: llmResponse.data.resource_metrics,
+        recommendations: llmResponse.data.recommendations,
+        warnings: llmResponse.data.warnings,
+        status: 'complete'
+      }));
+      
     } catch (error) {
       console.error('Analysis failed:', error);
       setError(
@@ -56,6 +96,8 @@ function App() {
       );
     } finally {
       setIsLoading(false);
+      setIsLoadingExecutionPlan(false);
+      setIsLoadingLLM(false);
     }
   };
 
@@ -167,23 +209,51 @@ function App() {
         {/* Results Tab */}
         {activeTab === 'results' && analysis && (
           <div className="space-y-6">
-            {/* Rewritten Query */}
-            <RewrittenQuery 
-              rewrittenQuery={analysis.rewritten_query} 
-              originalQuery={analysis.query} 
-            />
+            {/* Execution Plan - показываем сразу */}
+            {analysis.execution_plan && (
+              <div>
+                <ExecutionPlan plan={analysis.execution_plan?.plan_json} />
+                {isLoadingLLM && (
+                  <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="flex items-center">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-3"></div>
+                      <span className="text-blue-700">Анализ LLM в процессе...</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
-            {/* Execution Plan */}
-            <ExecutionPlan plan={analysis.execution_plan?.plan_json} />
+            {/* LLM Analysis - показываем только когда готово */}
+            {analysis.status === 'complete' && (
+              <>
+                {/* Rewritten Query - только если есть предупреждения */}
+                {analysis.rewritten_query && 
+                 analysis.warnings && 
+                 Array.isArray(analysis.warnings) && 
+                 analysis.warnings.length > 0 && (
+                  <RewrittenQuery 
+                    rewrittenQuery={analysis.rewritten_query} 
+                    originalQuery={analysis.query} 
+                  />
+                )}
 
-            {/* Resource Metrics */}
-            <ResourceMetrics resourceMetrics={analysis.resource_metrics} />
+                {/* Resource Metrics */}
+                {analysis.resource_metrics && (
+                  <ResourceMetrics resourceMetrics={analysis.resource_metrics} />
+                )}
 
-            {/* Recommendations */}
-            <Recommendations recommendations={analysis.recommendations} />
+                {/* Recommendations */}
+                {analysis.recommendations && (
+                  <Recommendations recommendations={analysis.recommendations} />
+                )}
 
-            {/* Warnings */}
-            <Warnings warnings={analysis.warnings} />
+                {/* Warnings */}
+                {analysis.warnings && (
+                  <Warnings warnings={analysis.warnings} />
+                )}
+              </>
+            )}
 
             {/* Analysis Info */}
             <div className="card">

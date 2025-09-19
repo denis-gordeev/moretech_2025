@@ -139,3 +139,9 @@ jspm_packages/
 # Temporary files
 tmp/
 temp/
+
+# Cache files (keep sample and README)
+cache/cache_*.json
+cache/execution_plans.json
+!cache/cache_sample.json
+!cache/README.md

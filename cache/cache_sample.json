@@ -1,0 +1,26 @@
+{
+  "sample_cache_entry": {
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 15,
+      "memory_usage": 8,
+      "disk_io": 2,
+      "network_io": 0,
+      "estimated_cost": 0.05
+    },
+    "recommendations": [
+      {
+        "type": "index_optimization",
+        "priority": "high",
+        "title": "Создание индекса",
+        "description": "Рекомендуется создать индекс для улучшения производительности",
+        "potential_improvement": "Ускорение запроса на 50-80%",
+        "implementation": "CREATE INDEX idx_column ON table_name (column_name);",
+        "estimated_speedup": 65.0
+      }
+    ],
+    "warnings": [
+      "Предупреждение: SELECT * может возвращать избыточные данные"
+    ]
+  }
+}

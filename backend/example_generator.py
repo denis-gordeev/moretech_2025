@@ -37,6 +37,28 @@ class ExampleGenerator:
             logger.error(f"Failed to generate examples with LLM: {e}")
             return []
 
+    async def generate_examples_with_llm_for_database(self, analyzer: PostgreSQLAnalyzer) -> List[Dict[str, Any]]:
+        """
+        Генерирует примеры SQL запросов с помощью LLM для конкретной базы данных,
+        адаптируя существующие примеры под новую схему БД
+        """
+        try:
+            # Получаем структуру указанной БД
+            db_structure = await self._get_database_structure_for_analyzer(analyzer)
+
+            # Загружаем существующие примеры как шаблоны
+            template_examples = await self._load_existing_examples()
+
+            # Адаптируем примеры под новую схему БД
+            adapted_examples = await self._adapt_examples_to_database_schema(template_examples, db_structure)
+
+            logger.info(f"Adapted {len(adapted_examples)} examples for specific database schema")
+            return adapted_examples
+
+        except Exception as e:
+            logger.error(f"Failed to adapt examples for database: {e}")
+            return []
+
     async def _get_database_structure(self) -> Dict[str, Any]:
         """Получает подробную структуру базы данных"""
         try:
@@ -169,6 +191,264 @@ class ExampleGenerator:
         except Exception as e:
             logger.error(f"Failed to get database structure: {e}")
             return {"tables": [], "total_tables": 0, "database_info": {}}
+
+    async def _get_database_structure_for_analyzer(self, analyzer: PostgreSQLAnalyzer) -> Dict[str, Any]:
+        """Получает подробную структуру базы данных для указанного анализатора"""
+        try:
+            async with analyzer.get_connection() as conn:
+                # Получаем информацию о таблицах и их колонках
+                tables_query = """
+                SELECT
+                    t.table_name,
+                    t.table_type,
+                    c.column_name,
+                    c.data_type,
+                    c.is_nullable,
+                    c.column_default,
+                    c.character_maximum_length,
+                    CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary_key,
+                    CASE WHEN fk.column_name IS NOT NULL THEN true ELSE false END as is_foreign_key,
+                    fk.foreign_table_name,
+                    fk.foreign_column_name
+                FROM information_schema.tables t
+                LEFT JOIN information_schema.columns c ON t.table_name = c.table_name
+                LEFT JOIN (
+                    SELECT ku.table_name, ku.column_name
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage ku ON tc.constraint_name = ku.constraint_name
+                    WHERE tc.constraint_type = 'PRIMARY KEY'
+                ) pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name
+                LEFT JOIN (
+                    SELECT
+                        ku.table_name,
+                        ku.column_name,
+                        ccu.table_name AS foreign_table_name,
+                        ccu.column_name AS foreign_column_name
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage ku ON tc.constraint_name = ku.constraint_name
+                    JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name
+                    WHERE tc.constraint_type = 'FOREIGN KEY'
+                ) fk ON c.table_name = fk.table_name AND c.column_name = fk.column_name
+                WHERE t.table_schema NOT IN ('information_schema', 'pg_catalog')
+                ORDER BY t.table_name, c.ordinal_position
+                LIMIT 20
+                """
+
+                rows = await conn.fetch(tables_query)
+
+                # Получаем информацию о индексах
+                indexes_query = """
+                SELECT
+                    schemaname,
+                    tablename,
+                    indexname,
+                    indexdef
+                FROM pg_indexes
+                WHERE schemaname NOT IN ('information_schema', 'pg_catalog')
+                ORDER BY tablename, indexname
+                LIMIT 20
+                """
+
+                index_rows = await conn.fetch(indexes_query)
+
+                # Получаем информацию о ограничениях
+                constraints_query = """
+                SELECT
+                    tc.constraint_name,
+                    tc.table_name,
+                    tc.constraint_type,
+                    kcu.column_name
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+                WHERE tc.table_schema NOT IN ('information_schema', 'pg_catalog')
+                ORDER BY tc.table_name, tc.constraint_name
+                LIMIT 20
+                """
+
+                constraint_rows = await conn.fetch(constraints_query)
+
+                # Структурируем данные
+                tables = {}
+                for row in rows:
+                    table_name = row['table_name']
+                    schema_name = row.get('table_schema', 'public')
+                    full_table_name = f"{schema_name}.{table_name}" if schema_name != 'public' else table_name
+                    
+                    if full_table_name not in tables:
+                        tables[full_table_name] = {
+                            'name': full_table_name,
+                            'schema': schema_name,
+                            'type': row['table_type'],
+                            'columns': []
+                        }
+                    
+                    if row['column_name']:  # Пропускаем строки без колонок
+                        tables[full_table_name]['columns'].append({
+                            'name': row['column_name'],
+                            'type': row['data_type'],
+                            'nullable': row['is_nullable'] == 'YES',
+                            'default': row['column_default'],
+                            'max_length': row['character_maximum_length'],
+                            'is_primary_key': row['is_primary_key'],
+                            'is_foreign_key': row['is_foreign_key'],
+                            'foreign_table': row['foreign_table_name'],
+                            'foreign_column': row['foreign_column_name']
+                        })
+
+                indexes = [{
+                    'schema': row['schemaname'],
+                    'table': row['tablename'],
+                    'name': row['indexname'],
+                    'definition': row['indexdef']
+                } for row in index_rows]
+
+                constraints = [{
+                    'name': row['constraint_name'],
+                    'table': row['table_name'],
+                    'type': row['constraint_type'],
+                    'column': row['column_name']
+                } for row in constraint_rows]
+
+                return {
+                    'tables': list(tables.values()),
+                    'indexes': indexes,
+                    'constraints': constraints,
+                    'total_tables': len(tables),
+                    'database_info': await analyzer.get_database_info(),
+                }
+
+        except Exception as e:
+            logger.error(f"Failed to get database structure for analyzer: {e}")
+            return {"tables": [], "indexes": [], "constraints": [], "total_tables": 0, "database_info": {}}
+
+    async def _adapt_examples_to_database_schema(self, template_examples: List[Dict[str, Any]], db_structure: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Адаптирует существующие примеры под новую схему базы данных
+        """
+        try:
+            # Создаем промпт для адаптации примеров
+            prompt = self._create_adaptation_prompt(template_examples, db_structure)
+
+            # Используем LLM для адаптации примеров
+            response = await self.llm_analyzer.client.beta.chat.completions.parse(
+                model=self.llm_analyzer.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Ты эксперт по PostgreSQL и адаптации SQL запросов. "
+                            "Твоя задача - адаптировать существующие примеры SQL запросов "
+                            "под новую схему базы данных, сохраняя логику и структуру запросов. "
+                            "Отвечай ТОЛЬКО в формате JSON. Будь кратким."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                response_format=ExampleGenerationResponse,
+                temperature=0.3,  # Низкая температура для более точной адаптации
+                max_tokens=2000,  # Ограничиваем размер ответа
+            )
+
+            # Получаем структурированный ответ
+            try:
+                result = response.choices[0].message.parsed
+            except Exception as parse_error:
+                logger.error(f"Failed to parse LLM response: {parse_error}")
+                # Попробуем получить raw content и очистить его
+                raw_content = response.choices[0].message.content
+                if raw_content:
+                    # Удаляем markdown код блоки
+                    cleaned_content = raw_content.replace('```json', '').replace('```', '').strip()
+                    try:
+                        import json
+                        parsed_data = json.loads(cleaned_content)
+                        if isinstance(parsed_data, list):
+                            result = type('Result', (), {'examples': [type('Example', (), ex) for ex in parsed_data]})()
+                        else:
+                            raise Exception("Invalid JSON structure")
+                    except Exception as json_error:
+                        logger.error(f"Failed to parse cleaned JSON: {json_error}")
+                        return []
+
+            # Преобразуем в нужный формат
+            adapted_examples = []
+            for example in result.examples:
+                adapted_examples.append({
+                    "name": example.name,
+                    "query": example.query,
+                    "description": example.description,
+                    "category": getattr(example, 'category', 'adapted'),
+                    "difficulty": getattr(example, 'difficulty', 'medium')
+                })
+
+            return adapted_examples
+
+        except Exception as e:
+            logger.error(f"Failed to adapt examples to database schema: {e}")
+            return []
+
+    def _create_adaptation_prompt(self, template_examples: List[Dict[str, Any]], db_structure: Dict[str, Any]) -> str:
+        """
+        Создает промпт для адаптации примеров под новую схему БД
+        """
+        # Получаем информацию о таблицах новой БД
+        tables_info = []
+        for table in db_structure.get('tables', []):
+            table_name = table['name']
+            table_info = f"Таблица: {table_name}\n"
+            table_info += f"  Тип: {table['type']}\n"
+            table_info += "  Колонки:\n"
+            for column in table.get('columns', []):
+                table_info += f"    - {column['name']} ({column['type']})"
+                if column.get('is_primary_key'):
+                    table_info += " [PRIMARY KEY]"
+                if column.get('is_foreign_key'):
+                    table_info += f" [FOREIGN KEY -> {column['foreign_table']}.{column['foreign_column']}]"
+                table_info += "\n"
+            tables_info.append(table_info)
+            
+        # Добавляем пример использования
+        if tables_info:
+            tables_info.append("\nПРИМЕР ИСПОЛЬЗОВАНИЯ:")
+            tables_info.append("Используй полные имена таблиц: rnacen.table_name")
+            tables_info.append("Пример: SELECT * FROM rnacen.auth_permission WHERE name = 'test'")
+
+        # Создаем список шаблонных примеров (берем только 5 самых важных)
+        template_list = []
+        for i, example in enumerate(template_examples[:5], 1):  # Берем только первые 5 примеров
+            # Сокращаем длинные запросы
+            query = example['query']
+            if len(query) > 200:
+                query = query[:200] + "..."
+            template_list.append(f"{i}. {example['name']}\n   Запрос: {query}\n   Описание: {example['description']}")
+
+        prompt = f"""
+Адаптируй SQL примеры под новую схему БД.
+
+СХЕМА БД:
+{chr(10).join(tables_info)}
+
+ШАБЛОНЫ:
+{chr(10).join(template_list)}
+
+ЗАДАЧА: 
+1. Замени названия таблиц на соответствующие из новой схемы (используй полные имена с схемой, например rnacen.table_name)
+2. Замени названия колонок на соответствующие из новой схемы
+3. Сохрани логику и структуру запросов
+4. Адаптируй описания под предметную область новой БД
+
+ПРАВИЛА МАППИНГА:
+- Если в шаблоне есть таблица 'users' -> используй rnacen.auth_permission или rnacen.blog
+- Если в шаблоне есть таблица 'orders' -> используй rnacen.ensembl_assembly или rnacen.cpat_results  
+- Если в шаблоне есть таблица 'order_items' -> используй rnacen.go_term_annotations или rnacen.ensembl_compara
+- Выбирай таблицы с подходящими колонками (id, name, content, etc.)
+
+ВАЖНО: Используй ТОЛЬКО таблицы и колонки из предоставленной схемы БД!
+
+Верни ТОЛЬКО 5 адаптированных примеров в JSON формате. НЕ используй markdown код блоки, только чистый JSON.
+"""
+
+        return prompt
 
     async def _load_existing_examples(self) -> List[Dict[str, Any]]:
         """Загружает существующие примеры запросов"""

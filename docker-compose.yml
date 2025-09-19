@@ -39,6 +39,15 @@ services:
       - LLM_API_KEY_2=${LLM_API_KEY_2}
       - LLM_MODEL_2=${LLM_MODEL_2}
       - LLM_URL_2=${LLM_URL_2}
+      - LLM_API_KEY_3=${LLM_API_KEY_3}
+      - LLM_MODEL_3=${LLM_MODEL_3}
+      - LLM_URL_3=${LLM_URL_3}
+      - LLM_API_KEY_4=${LLM_API_KEY_4}
+      - LLM_MODEL_4=${LLM_MODEL_4}
+      - LLM_URL_4=${LLM_URL_4}
+      - LLM_API_KEY_5=${LLM_API_KEY_5}
+      - LLM_MODEL_5=${LLM_MODEL_5}
+      - LLM_URL_5=${LLM_URL_5}
       
       # Application Configuration
       - DEBUG=${DEBUG:-false}
@@ -52,6 +61,7 @@ services:
     #   - postgres
     volumes:
       - ./backend:/app
+      - ./cache:/app/cache
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     # Добавляем extra_hosts для доступа к внешнему PostgreSQL
     extra_hosts:

@@ -35,9 +35,25 @@ export const queryAnalyzerAPI = {
   // Health check
   healthCheck: () => api.get('/health'),
   
-  // Analyze query
+  // Analyze query (full analysis)
   analyzeQuery: (query, databaseProfileId = null, databaseUrl = null) => 
     api.post('/analyze', { 
+      query, 
+      database_profile_id: databaseProfileId,
+      database_url: databaseUrl 
+    }),
+  
+  // Analyze execution plan only (fast response)
+  analyzeExecutionPlan: (query, databaseProfileId = null, databaseUrl = null) => 
+    api.post('/analyze/execution-plan', { 
+      query, 
+      database_profile_id: databaseProfileId,
+      database_url: databaseUrl 
+    }),
+  
+  // Analyze with LLM only (uses cached execution plan)
+  analyzeWithLLM: (query, databaseProfileId = null, databaseUrl = null) => 
+    api.post('/analyze/llm', { 
       query, 
       database_profile_id: databaseProfileId,
       database_url: databaseUrl 
@@ -50,7 +66,10 @@ export const queryAnalyzerAPI = {
   testDatabaseConnection: (config) => api.post('/database/test', config),
   
   // Get example queries
-  getExampleQueries: () => api.get('/examples'),
+  getExampleQueries: (databaseProfileId = null) => {
+    const params = databaseProfileId ? { database_profile_id: databaseProfileId } : {};
+    return api.get('/examples', { params });
+  },
   
   // LLM Models
   getAvailableModels: () => api.get('/models'),
