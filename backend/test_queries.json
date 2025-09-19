@@ -97,8 +97,8 @@
     },
     {
       "name": "UPDATE with calculation",
-      "query": "UPDATE order_items SET total_price = quantity * unit_price WHERE total_price IS NULL",
-      "description": "Обновление с вычислениями"
+      "query": "UPDATE orders SET total_amount = (SELECT SUM(quantity * price) FROM order_items WHERE order_id = orders.id)",
+      "description": "Обновление с вычислениями через подзапрос"
     },
     {
       "name": "Simple DELETE",
@@ -134,6 +134,21 @@
       "name": "Inefficient DELETE (no index)",
       "query": "DELETE FROM orders WHERE status LIKE '%old%'",
       "description": "Неэффективное удаление без индекса"
+    },
+    {
+      "name": "Error: Non-existent table",
+      "query": "SELECT * FROM non_existent_table WHERE id = 1",
+      "description": "Запрос с ошибкой - таблица не существует (демонстрация обработки ошибок PostgreSQL)"
+    },
+    {
+      "name": "Error: Non-existent column",
+      "query": "SELECT non_existent_column FROM users WHERE id = 1",
+      "description": "Запрос с ошибкой - колонка не существует (демонстрация обработки ошибок PostgreSQL)"
+    },
+    {
+      "name": "Error: Syntax error",
+      "query": "SELECT * FROM users WHERE id = (SELECT MAX(id) FROM orders",
+      "description": "Запрос с синтаксической ошибкой - незакрытая скобка (демонстрация обработки ошибок PostgreSQL)"
     }
   ]
 }
