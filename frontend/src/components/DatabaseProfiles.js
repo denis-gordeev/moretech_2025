@@ -25,8 +25,8 @@ const DatabaseProfiles = ({ onProfileSelect, selectedProfile }) => {
   const loadProfiles = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch('http://localhost:8000/database/profiles');
-      const data = await response.json();
+      const response = await queryAnalyzerAPI.getDatabaseProfiles();
+      const data = response.data;
       
       if (data.status === 'success') {
         setProfiles(data.profiles);
@@ -48,17 +48,8 @@ const DatabaseProfiles = ({ onProfileSelect, selectedProfile }) => {
       setIsLoading(true);
       setError(null);
       
-      const formData = new FormData();
-      Object.keys(newProfile).forEach(key => {
-        formData.append(key, newProfile[key]);
-      });
-
-      const response = await fetch('http://localhost:8000/database/profiles', {
-        method: 'POST',
-        body: formData
-      });
-      
-      const data = await response.json();
+      const response = await queryAnalyzerAPI.createDatabaseProfile(newProfile);
+      const data = response.data;
       
       if (data.status === 'success') {
         setSuccess('Database profile created successfully!');
@@ -90,11 +81,8 @@ const DatabaseProfiles = ({ onProfileSelect, selectedProfile }) => {
     
     try {
       setIsLoading(true);
-      const response = await fetch(`http://localhost:8000/database/profiles/${profileId}`, {
-        method: 'DELETE'
-      });
-      
-      const data = await response.json();
+      const response = await queryAnalyzerAPI.deleteDatabaseProfile(profileId);
+      const data = response.data;
       
       if (data.status === 'success') {
         setSuccess('Profile deleted successfully');
@@ -125,11 +113,8 @@ const DatabaseProfiles = ({ onProfileSelect, selectedProfile }) => {
       setIsLoading(true);
       setError(null);
       
-      const response = await fetch('http://localhost:8000/database/profiles/default', {
-        method: 'POST'
-      });
-      
-      const data = await response.json();
+      const response = await queryAnalyzerAPI.refreshDefaultProfile();
+      const data = response.data;
       
       if (data.status === 'success') {
         setSuccess('Default database profile refreshed successfully!');

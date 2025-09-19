@@ -1,0 +1,29 @@
+{
+  "profiles": [
+    {
+      "id": "386c249185b875b5",
+      "name": "Default Database",
+      "host": "10.128.0.3",
+      "port": 5432,
+      "database": "query_analyzer",
+      "username": "analyzer_user",
+      "created_at": "2025-09-19T15:58:37.631318",
+      "last_used": null,
+      "is_active": true,
+      "connection_test_passed": true
+    },
+    {
+      "id": "a25bcb0fc9db9d05",
+      "name": "RNA Central Database",
+      "host": "hh-pgsql-public.ebi.ac.uk",
+      "port": 5432,
+      "database": "pfmegrnargs",
+      "username": "reader",
+      "created_at": "2025-09-19T15:58:37.965756",
+      "last_used": null,
+      "is_active": true,
+      "connection_test_passed": true
+    }
+  ],
+  "last_saved": "2025-09-19T15:58:37.965832"
+}

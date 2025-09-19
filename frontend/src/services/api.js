@@ -1,9 +1,12 @@
 import axios from 'axios';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+console.log('🔗 API_BASE_URL configured as:', API_BASE_URL);
+console.log('🔗 process.env.REACT_APP_API_URL:', process.env.REACT_APP_API_URL);
 
 const api = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 10000, // 10 second timeout
   headers: {
     'Content-Type': 'application/json',
   },
@@ -70,6 +73,12 @@ export const queryAnalyzerAPI = {
     const params = databaseProfileId ? { database_profile_id: databaseProfileId } : {};
     return api.get('/examples', { params });
   },
+  
+  // Database Profiles
+  getDatabaseProfiles: () => api.get('/database/profiles'),
+  createDatabaseProfile: (profile) => api.post('/database/profiles', profile),
+  deleteDatabaseProfile: (profileId) => api.delete(`/database/profiles/${profileId}`),
+  refreshDefaultProfile: () => api.post('/database/profiles/default'),
   
   // LLM Models
   getAvailableModels: () => api.get('/models'),

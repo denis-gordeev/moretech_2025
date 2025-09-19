@@ -1,23 +1,25 @@
 version: '3.8'
 
 services:
-  # Внешний PostgreSQL сервис (закомментирован, так как используется внешний)
-  # postgres:
-  #   image: postgres:15
-  #   environment:
-  #     POSTGRES_DB: query_analyzer
-  #     POSTGRES_USER: analyzer_user
-  #     POSTGRES_PASSWORD: analyzer_pass
-  #   ports:
-  #     - "5432:5432"
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #     - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
-  #   command: >
-  #     postgres
-  #     -c shared_preload_libraries=pg_stat_statements
-  #     -c pg_stat_statements.track=all
-  #     -c pg_stat_statements.max=10000
+  # PostgreSQL service (containerized)
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: query_analyzer
+      POSTGRES_USER: analyzer_user
+      POSTGRES_PASSWORD: analyzer_pass
+    ports:
+      - "0.0.0.0:5432:5432"  # Bind to all interfaces
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c pg_stat_statements.max=10000
+      -c listen_addresses='*'
+      -c log_statement=all
 
   backend:
     build: ./backend
@@ -56,9 +58,8 @@ services:
       # Analysis Configuration
       - MAX_QUERY_LENGTH=${MAX_QUERY_LENGTH:-10000}
       - ANALYSIS_TIMEOUT=${ANALYSIS_TIMEOUT:-30}
-    # Убираем зависимость от внутреннего postgres
-    # depends_on:
-    #   - postgres
+    depends_on:
+      - postgres
     volumes:
       - ./backend:/app
       - ./cache:/app/cache
@@ -72,11 +73,11 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:8000}
+      - REACT_APP_API_URL=${REACT_APP_API_URL:-http://193.246.150.25:8000}
     volumes:
       - ./frontend:/app
       - /app/node_modules
     command: npm start
 
-# volumes:
-#   postgres_data:
+volumes:
+  postgres_data:
