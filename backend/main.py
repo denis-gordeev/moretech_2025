@@ -756,7 +756,7 @@ async def get_example_queries(database_profile_id: str = None):
         if database_profile_id:
             try:
                 # Адаптируем существующие примеры под схему выбранной БД
-                adapted_examples = await example_generator.generate_examples_with_llm_for_database(analyzer)
+                adapted_examples = await example_generator.generate_examples_with_llm_for_database(analyzer, database_profile_id)
                 if adapted_examples:
                     # Заменяем стандартные примеры на адаптированные
                     test_queries = adapted_examples

@@ -15,6 +15,8 @@ class ExampleGenerator:
     def __init__(self):
         self.db_analyzer = PostgreSQLAnalyzer()
         self.llm_analyzer = LLMAnalyzer()
+        # Кэш для адаптированных примеров по профилям БД
+        self._adapted_examples_cache = {}
 
     async def generate_examples_with_llm(self) -> List[Dict[str, Any]]:
         """
@@ -37,12 +39,22 @@ class ExampleGenerator:
             logger.error(f"Failed to generate examples with LLM: {e}")
             return []
 
-    async def generate_examples_with_llm_for_database(self, analyzer: PostgreSQLAnalyzer) -> List[Dict[str, Any]]:
+    async def generate_examples_with_llm_for_database(self, analyzer: PostgreSQLAnalyzer, database_profile_id: str = None) -> List[Dict[str, Any]]:
         """
         Генерирует примеры SQL запросов с помощью LLM для конкретной базы данных,
         адаптируя существующие примеры под новую схему БД
         """
         try:
+            # Создаем ключ кэша на основе URL базы данных
+            cache_key = analyzer.database_url
+            
+            # Проверяем кэш
+            if cache_key in self._adapted_examples_cache:
+                logger.info(f"Using cached adapted examples for database profile {database_profile_id}")
+                return self._adapted_examples_cache[cache_key]
+
+            logger.info(f"Generating new adapted examples for database profile {database_profile_id}")
+            
             # Получаем структуру указанной БД
             db_structure = await self._get_database_structure_for_analyzer(analyzer)
 
@@ -52,7 +64,10 @@ class ExampleGenerator:
             # Адаптируем примеры под новую схему БД
             adapted_examples = await self._adapt_examples_to_database_schema(template_examples, db_structure)
 
-            logger.info(f"Adapted {len(adapted_examples)} examples for specific database schema")
+            # Сохраняем в кэш
+            self._adapted_examples_cache[cache_key] = adapted_examples
+
+            logger.info(f"Adapted {len(adapted_examples)} examples for specific database schema and cached")
             return adapted_examples
 
         except Exception as e:
