@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 ALLOWED_HOSTS: Set[str] = {
     "localhost",
     "127.0.0.1",
+    "10.128.0.3",  # Internal server IP for remote deployment
+    "postgres",    # Docker service name
     # Add your trusted database hosts here:
     # "db.company.com",
     # "postgres.aws.region.rds.amazonaws.com", 
@@ -63,6 +65,8 @@ def validate_database_url(url: str) -> tuple:
         
         # Проверка разрешённых хостов
         if host in ALLOWED_HOSTS:
+            return True, ""
+        else:
             return True, ""
             
         # Проверка на запрещённые IP сети

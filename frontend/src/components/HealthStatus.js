@@ -29,7 +29,7 @@ const HealthStatus = () => {
   useEffect(() => {
     checkHealth();
     // Проверяем здоровье каждые 30 секунд
-    const interval = setInterval(checkHealth, 30000);
+    const interval = setInterval(checkHealth, 14400000);
     return () => clearInterval(interval);
   }, []);
 

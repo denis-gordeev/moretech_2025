@@ -24,8 +24,29 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://analyzer_user:analyzer_pass@postgres:5432/query_analyzer
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # Database Configuration
+      - DATABASE_URL=${DATABASE_URL:-postgresql://analyzer_user:analyzer_pass@postgres:5432/query_analyzer}
+      
+      # LLM Configuration (Primary)
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_URL=${LLM_URL}
+      
+      # Additional LLM Models
+      - LLM_API_KEY_1=${LLM_API_KEY_1}
+      - LLM_MODEL_1=${LLM_MODEL_1}
+      - LLM_URL_1=${LLM_URL_1}
+      - LLM_API_KEY_2=${LLM_API_KEY_2}
+      - LLM_MODEL_2=${LLM_MODEL_2}
+      - LLM_URL_2=${LLM_URL_2}
+      
+      # Application Configuration
+      - DEBUG=${DEBUG:-false}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000, http://193.246.150.25:3000}
+      
+      # Analysis Configuration
+      - MAX_QUERY_LENGTH=${MAX_QUERY_LENGTH:-10000}
+      - ANALYSIS_TIMEOUT=${ANALYSIS_TIMEOUT:-30}
     depends_on:
       - postgres
     volumes:
@@ -37,7 +58,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:8000}
     volumes:
       - ./frontend:/app
       - /app/node_modules
