@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    environment:
+      # External PostgreSQL connection (configure via .env on server)
+      - DATABASE_URL=${DATABASE_URL}
+      # LLM configuration (matches backend/config.py)
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o}
+      - LLM_URL=${LLM_URL:-https://api.openai.com/v1}
+      # CORS not strictly needed behind same-origin proxy, but kept configurable
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+    expose:
+      - "8000"
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        # Build-time API base to ensure frontend uses same-origin proxy
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-/api}
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+

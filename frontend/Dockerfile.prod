@@ -1,0 +1,24 @@
+FROM node:18-alpine AS build
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+# Build-time API base for React
+ARG REACT_APP_API_URL=/api
+ENV REACT_APP_API_URL=$REACT_APP_API_URL
+
+COPY . .
+RUN npm run build
+
+FROM nginx:alpine
+
+# Nginx config to serve frontend and reverse proxy API to backend
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Static files
+COPY --from=build /app/build /usr/share/nginx/html
+
+EXPOSE 80
+
