@@ -66,6 +66,10 @@ class QueryAnalysis(BaseModel):
     recommendations: List[OptimizationRecommendation] = Field(..., description="Рекомендации")
     warnings: List[str] = Field(default_factory=list, description="Предупреждения")
     analysis_timestamp: datetime = Field(default_factory=datetime.now, description="Время анализа")
+    # Новые поля для обработки ошибок
+    has_errors: bool = Field(default=False, description="Есть ли ошибки в запросе")
+    postgresql_errors: List[str] = Field(default_factory=list, description="Ошибки PostgreSQL (таблицы/колонки не существуют)")
+    error_analysis: Optional[str] = Field(None, description="Анализ ошибок от LLM")
 
 
 class DatabaseConfig(BaseModel):
@@ -135,3 +139,16 @@ class LLMAnalysisResponse(BaseModel):
     resource_metrics: LLMResourceMetrics = Field(..., description="Метрики ресурсов")
     recommendations: List[LLMOptimizationRecommendation] = Field(..., description="Список рекомендаций")
     warnings: List[str] = Field(default_factory=list, description="Список предупреждений на русском языке")
+
+
+class ExecutionPlanResponse(BaseModel):
+    """Ответ с планом выполнения запроса"""
+
+    query: str = Field(..., description="Исходный запрос")
+    execution_plan: ExecutionPlan = Field(..., description="План выполнения")
+    status: str = Field(..., description="Статус анализа")
+    analysis_timestamp: datetime = Field(default_factory=datetime.now, description="Время анализа")
+    # Поля для обработки ошибок
+    has_errors: bool = Field(default=False, description="Есть ли ошибки в запросе")
+    postgresql_errors: List[str] = Field(default_factory=list, description="Ошибки PostgreSQL")
+    error_analysis: Optional[str] = Field(None, description="Анализ ошибок")

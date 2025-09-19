@@ -138,7 +138,8 @@ class PostgreSQLAnalyzer:
                     logger.warning(f"DML query failed after conversion attempt, returning basic info: {e}")
                     return self._create_dml_plan_info(query_type, query)
                 else:
-                    raise Exception(f"Query explanation error: {e}")
+                    # Возвращаем информацию об ошибке вместо исключения
+                    return self._create_error_plan_info(query_type, query, str(e))
 
     def _create_dml_plan_info(self, query_type: str, query: str) -> Dict[str, Any]:
         """
@@ -156,6 +157,25 @@ class PostgreSQLAnalyzer:
             "Relation Name": table_name,
             "Description": f"DML operation on table: {table_name}",
             "Note": "Plan generated without EXPLAIN due to read-only permissions"
+        }
+
+    def _create_error_plan_info(self, query_type: str, query: str, error_message: str) -> Dict[str, Any]:
+        """
+        Создает информацию о плане для запросов с ошибками PostgreSQL
+        """
+        # Извлекаем имя таблицы из запроса для анализа
+        table_name = self._extract_table_name_from_dml(query) if query_type in ["INSERT", "UPDATE", "DELETE"] else "unknown"
+
+        return {
+            "Node Type": "Error",
+            "Total Cost": 0,
+            "Plan Rows": 0,
+            "Plan Width": 0,
+            "Query Type": query_type,
+            "Relation Name": table_name,
+            "Description": f"Query failed with PostgreSQL error",
+            "Error": error_message,
+            "Note": "Query contains errors that prevent execution plan generation"
         }
 
     def _extract_table_name_from_dml(self, query: str) -> str:
@@ -232,8 +252,9 @@ class PostgreSQLAnalyzer:
         else:
             from_match = None
         
-        # Извлекаем WHERE условие
-        where_match = re.search(r'WHERE\s+(.+?)(?:\s+ORDER\s+BY|\s+LIMIT|$)', query, re.IGNORECASE | re.DOTALL)
+        # Извлекаем WHERE условие (только на верхнем уровне, не внутри подзапросов)
+        # Ищем WHERE после SET и перед ORDER BY/LIMIT, но не внутри скобок
+        where_match = re.search(r'WHERE\s+([^()]+?)(?:\s+ORDER\s+BY|\s+LIMIT|$)', query, re.IGNORECASE | re.DOTALL)
         where_clause = where_match.group(1).strip() if where_match else "1=1"
         
         # Создаем SELECT запрос
@@ -384,6 +405,10 @@ class PostgreSQLAnalyzer:
         # Анализируем узлы плана для подсчета I/O операций
         io_operations = self._count_io_operations(plan)
 
+        # Проверяем, есть ли ошибки в плане
+        has_errors = plan.get("Node Type") == "Error"
+        postgresql_errors = [plan.get("Error")] if has_errors and plan.get("Error") else []
+
         return {
             "total_cost": total_cost,
             "execution_time": execution_time,
@@ -391,6 +416,8 @@ class PostgreSQLAnalyzer:
             "width": width,
             "io_operations": io_operations,
             "plan_json": plan,
+            "has_errors": has_errors,
+            "postgresql_errors": postgresql_errors,
         }
 
     def _count_io_operations(self, plan: Dict[str, Any]) -> int:

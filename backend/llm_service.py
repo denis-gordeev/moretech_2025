@@ -143,77 +143,139 @@ class LLMAnalyzer:
 """
             )
 
-            # Используем структурированный вывод с Pydantic
-            response = await self.client.beta.chat.completions.parse(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Ты эксперт по оптимизации PostgreSQL. Анализируй SQL запросы и "
-                            "предоставляй детальные рекомендации по улучшению производительности на русском языке."
-                        ),
-                    },
-                    {"role": "user", "content": structured_prompt},
-                ],
-                response_format=LLMAnalysisResponse,
-                temperature=0.1,
-            )
-
-            # Получаем структурированный ответ
-            analysis_result = response.choices[0].message.parsed
-            logger.info(f"LLM structured response received: {type(analysis_result)}")
+            # Проверяем, поддерживает ли модель структурированный вывод
+            is_openai_model = "openai.com" in self.selected_model.url or "gpt-" in self.model
+            
+            if is_openai_model:
+                # Используем структурированный вывод с Pydantic для OpenAI моделей
+                response = await self.client.beta.chat.completions.parse(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Ты эксперт по оптимизации PostgreSQL. Анализируй SQL запросы и "
+                                "предоставляй детальные рекомендации по улучшению производительности на русском языке."
+                            ),
+                        },
+                        {"role": "user", "content": structured_prompt},
+                    ],
+                    response_format=LLMAnalysisResponse,
+                    temperature=0.1,
+                    timeout=30.0,  # 30 секунд таймаут
+                )
+                # Получаем структурированный ответ
+                analysis_result = response.choices[0].message.parsed
+                logger.info(f"LLM structured response received: {type(analysis_result)}")
+            else:
+                # Для не-OpenAI моделей используем обычный chat completion с JSON парсингом
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Ты эксперт по оптимизации PostgreSQL. Анализируй SQL запросы и "
+                                "предоставляй детальные рекомендации по улучшению производительности на русском языке. "
+                                "ВСЕГДА отвечай ТОЛЬКО валидным JSON в формате, указанном в промпте. "
+                                "НЕ используй markdown, НЕ добавляй объяснения - только JSON."
+                            ),
+                        },
+                        {"role": "user", "content": structured_prompt},
+                    ],
+                    temperature=0.1,
+                    timeout=30.0,  # 30 секунд таймаут
+                )
+                
+                # Получаем raw content и парсим JSON
+                raw_content = response.choices[0].message.content
+                logger.info(f"LLM raw response received: {raw_content[:200]}...")
+                
+                # Очищаем и парсим JSON
+                cleaned_content = raw_content.strip()
+                if cleaned_content.startswith('```json'):
+                    cleaned_content = cleaned_content.replace('```json', '').replace('```', '').strip()
+                elif cleaned_content.startswith('```'):
+                    cleaned_content = cleaned_content.replace('```', '').strip()
+                
+                try:
+                    parsed_data = json.loads(cleaned_content)
+                    # Нормализуем структуру JSON для совместимости с Pydantic моделью
+                    recommendations = parsed_data.get("recommendations", parsed_data.get("optimization_recommendations", []))
+                    
+                    # Нормализуем каждую рекомендацию, добавляя недостающие поля
+                    normalized_recommendations = []
+                    for rec in recommendations:
+                        if isinstance(rec, dict):
+                            normalized_rec = {
+                                "type": rec.get("type", "general"),
+                                "description": rec.get("description", rec.get("recommendation", "")),
+                                "priority": rec.get("priority", "medium"),
+                                "estimated_speedup": rec.get("estimated_speedup", rec.get("speedup", None))
+                            }
+                            normalized_recommendations.append(normalized_rec)
+                        else:
+                            # Если это не словарь, создаем базовую структуру
+                            normalized_recommendations.append({
+                                "type": "general",
+                                "description": str(rec),
+                                "priority": "medium",
+                                "estimated_speedup": None
+                            })
+                    
+                    normalized_data = {
+                        "rewritten_query": parsed_data.get("rewritten_query"),
+                        "resource_metrics": parsed_data.get("resource_metrics", parsed_data.get("resource_usage", {})),
+                        "recommendations": normalized_recommendations,
+                        "warnings": parsed_data.get("warnings", [])
+                    }
+                    # Создаем объект для совместимости с Pydantic моделью
+                    analysis_result = type('AnalysisResult', (), normalized_data)()
+                    logger.info("Successfully parsed and normalized JSON response from non-OpenAI model")
+                except Exception as e:
+                    logger.error(f"Failed to parse JSON from non-OpenAI model: {e}")
+                    logger.error(f"Raw content: {raw_content}")
+                    raise Exception(f"Invalid JSON response from LLM: {e}")
 
             # Проверяем, что ответ был успешно распарсен
             if analysis_result is None:
                 logger.error("LLM response parsing failed - received None")
-                # Попробуем получить raw content и очистить его
-                raw_content = response.choices[0].message.content
-                if raw_content:
-                    logger.info("Attempting to parse raw LLM content")
-                    # Удаляем markdown код блоки если есть
-                    cleaned_content = raw_content.replace('```json', '').replace('```', '').strip()
-                    try:
-                        import json
-                        parsed_data = json.loads(cleaned_content)
-                        # Создаем временный объект для совместимости
-                        analysis_result = type('AnalysisResult', (), parsed_data)()
-                        logger.info("Successfully parsed raw LLM content")
-                    except Exception as json_error:
-                        logger.error(f"Failed to parse raw LLM content: {json_error}")
-                        # Возвращаем базовый результат в случае ошибки парсинга
-                        return {
-                            "rewritten_query": None,
-                            "resource_metrics": ResourceMetrics(
-                                cpu_usage=0,
-                                memory_usage=0,
-                                disk_io=0,
-                                network_io=0,
-                                estimated_cost=0
-                            ),
-                            "recommendations": [],
-                            "warnings": ["Не удалось проанализировать запрос с помощью LLM"]
-                        }
-                else:
-                    # Возвращаем базовый результат в случае ошибки парсинга
-                    return {
-                        "rewritten_query": None,
-                        "resource_metrics": ResourceMetrics(
-                            cpu_usage=0,
-                            memory_usage=0,
-                            disk_io=0,
-                            network_io=0,
-                            estimated_cost=0
-                        ),
-                        "recommendations": [],
-                        "warnings": ["Не удалось проанализировать запрос с помощью LLM"]
-                    }
+                # Возвращаем базовый результат в случае ошибки парсинга
+                return {
+                    "rewritten_query": None,
+                    "resource_metrics": ResourceMetrics(
+                        cpu_usage=0,
+                        memory_usage=0,
+                        disk_io=0,
+                        network_io=0,
+                        estimated_cost=0
+                    ),
+                    "recommendations": [],
+                    "warnings": ["Не удалось проанализировать запрос с помощью LLM"]
+                }
 
             # Преобразуем в наши модели
             recommendations = []
             for rec in analysis_result.recommendations:
                 # Обрабатываем estimated_speedup - может быть числом или строкой
-                estimated_speedup = rec.estimated_speedup
+                # rec может быть словарем (из normalized_data) или объектом (из OpenAI structured output)
+                if isinstance(rec, dict):
+                    estimated_speedup = rec.get("estimated_speedup")
+                    rec_type = rec.get("type", "general")
+                    rec_priority = rec.get("priority", "medium")
+                    rec_title = rec.get("title", "")
+                    rec_description = rec.get("description", "")
+                    rec_potential_improvement = rec.get("potential_improvement", "")
+                    rec_implementation = rec.get("implementation", "")
+                else:
+                    estimated_speedup = rec.estimated_speedup
+                    rec_type = rec.type
+                    rec_priority = rec.priority
+                    rec_title = rec.title
+                    rec_description = rec.description
+                    rec_potential_improvement = rec.potential_improvement
+                    rec_implementation = rec.implementation
+                
                 if estimated_speedup is not None:
                     try:
                         # Если это строка с диапазоном (например, "50-70"), берем среднее значение
@@ -228,23 +290,47 @@ class LLMAnalyzer:
 
                 recommendations.append(
                     OptimizationRecommendation(
-                        type=rec.type,
-                        priority=PriorityLevel(rec.priority),
-                        title=rec.title,
-                        description=rec.description,
-                        potential_improvement=rec.potential_improvement,
-                        implementation=rec.implementation,
+                        type=rec_type,
+                        priority=PriorityLevel(rec_priority),
+                        title=rec_title,
+                        description=rec_description,
+                        potential_improvement=rec_potential_improvement,
+                        implementation=rec_implementation,
                         estimated_speedup=estimated_speedup,
                     )
                 )
 
             # Обрабатываем метрики ресурсов, заменяя null на 0
-            resource_metrics_data = analysis_result.resource_metrics.dict()
-            for key in resource_metrics_data:
-                if resource_metrics_data[key] is None:
-                    resource_metrics_data[key] = 0
+            # analysis_result.resource_metrics может быть словарем (из normalized_data) или объектом (из OpenAI structured output)
+            if isinstance(analysis_result.resource_metrics, dict):
+                resource_metrics_data = analysis_result.resource_metrics.copy()
+            else:
+                resource_metrics_data = analysis_result.resource_metrics.dict()
+            
+            # Нормализуем названия полей для совместимости с ResourceMetrics
+            field_mapping = {
+                'cpu_usage_percent': 'cpu_usage',
+                'memory_usage_percent': 'memory_usage',
+                'memory_usage_mb': 'memory_usage',
+                'io_ops': 'io_operations',
+                'disk_read_count': 'disk_reads',
+                'disk_write_count': 'disk_writes'
+            }
+            
+            # Применяем маппинг полей
+            normalized_metrics = {}
+            for key, value in resource_metrics_data.items():
+                if key in field_mapping:
+                    normalized_metrics[field_mapping[key]] = value
+                else:
+                    normalized_metrics[key] = value
+            
+            # Заменяем null на 0 и устанавливаем значения по умолчанию
+            for key in ['cpu_usage', 'memory_usage', 'io_operations', 'disk_reads', 'disk_writes']:
+                if key not in normalized_metrics or normalized_metrics[key] is None:
+                    normalized_metrics[key] = 0
 
-            resource_metrics = ResourceMetrics(**resource_metrics_data)
+            resource_metrics = ResourceMetrics(**normalized_metrics)
 
             result = {
                 "rewritten_query": analysis_result.rewritten_query,

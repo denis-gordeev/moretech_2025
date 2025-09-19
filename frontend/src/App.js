@@ -69,6 +69,7 @@ function App() {
         query: executionPlanResponse.data.query,
         execution_plan: executionPlanResponse.data.execution_plan,
         status: 'execution_plan_ready',
+        analysis_timestamp: executionPlanResponse.data.analysis_timestamp,
         // Инициализируем пустые массивы для безопасности
         recommendations: [],
         warnings: [],
@@ -92,6 +93,7 @@ function App() {
         resource_metrics: llmResponse.data.resource_metrics,
         recommendations: llmResponse.data.recommendations,
         warnings: llmResponse.data.warnings,
+        analysis_timestamp: llmResponse.data.analysis_timestamp || prevAnalysis.analysis_timestamp,
         status: 'complete'
       }));
       

@@ -12,7 +12,7 @@ import logging
 import asyncio
 from datetime import datetime
 
-from models import QueryAnalysisRequest, QueryAnalysis, ExecutionPlan, HealthCheck, DatabaseConfig
+from models import QueryAnalysisRequest, QueryAnalysis, ExecutionPlan, HealthCheck, DatabaseConfig, ExecutionPlanResponse
 from database import PostgreSQLAnalyzer
 from llm_service import LLMAnalyzer
 from log_analyzer import PostgreSQLLogAnalyzer
@@ -197,10 +197,13 @@ async def startup_event():
         db_connected = await db_analyzer.test_connection()
         openai_available = await llm_analyzer.test_connection()
 
-        if db_connected and openai_available:
-            # Создаём профили по умолчанию для баз данных
+        # Создаём профили по умолчанию для баз данных (всегда, если база данных доступна)
+        if db_connected:
             await create_default_database_profiles()
-            
+        else:
+            logger.warning("Database not available - skipping profile creation")
+
+        if db_connected and openai_available:
             # Загружаем кэш для основной модели из файла
             await startup_load_cache()
             
@@ -215,7 +218,7 @@ async def startup_event():
             asyncio.create_task(startup_example_generation())
             asyncio.create_task(startup_table_statistics())
         else:
-            logger.warning("Skipping startup tasks - database or OpenAI not available")
+            logger.warning("Skipping LLM-related startup tasks - database or OpenAI not available")
 
     except Exception as e:
         logger.error(f"Startup cache warmup failed: {e}")
@@ -501,7 +504,7 @@ async def analyze_query(request: QueryAnalysisRequest):
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
-@app.post("/analyze/execution-plan")
+@app.post("/analyze/execution-plan", response_model=ExecutionPlanResponse)
 async def analyze_execution_plan(request: QueryAnalysisRequest):
     """
     Возвращает только план выполнения запроса (быстрый ответ)
@@ -572,11 +575,15 @@ async def analyze_execution_plan(request: QueryAnalysisRequest):
         )
 
         # Возвращаем только план выполнения
-        return {
-            "query": request.query,
-            "execution_plan": execution_plan,
-            "status": "execution_plan_ready"
-        }
+        return ExecutionPlanResponse(
+            query=request.query,
+            execution_plan=execution_plan,
+            status="execution_plan_ready",
+            analysis_timestamp=datetime.now(),
+            has_errors=plan_data.get("has_errors", False),
+            postgresql_errors=plan_data.get("postgresql_errors", []),
+            error_analysis=None  # Можно добавить анализ ошибок от LLM позже
+        )
 
     except HTTPException:
         raise
@@ -747,23 +754,51 @@ async def get_example_queries(database_profile_id: str = None):
                 analyzer = PostgreSQLAnalyzer(connection.get_connection_url())
                 logger.info(f"Using database profile {database_profile_id} for examples")
             else:
-                logger.warning(f"Database profile {database_profile_id} not found, using default")
+                # Попробуем восстановить соединение для существующего профиля
+                profile = profile_manager.get_profile(database_profile_id)
+                if profile:
+                    logger.info(f"Reconnecting to database profile {database_profile_id}")
+                    # Восстанавливаем соединение с паролем по умолчанию
+                    if profile.name == "Default Database":
+                        success, result = await profile_manager.refresh_connection(database_profile_id, "analyzer_pass")
+                    elif profile.name == "RNA Central Database":
+                        success, result = await profile_manager.refresh_connection(database_profile_id, "NWDMCE5xdipIjRrp")
+                    else:
+                        success = False
+                    
+                    if success:
+                        connection = profile_manager.get_connection(database_profile_id)
+                        if connection:
+                            analyzer = PostgreSQLAnalyzer(connection.get_connection_url())
+                            logger.info(f"Reconnected to database profile {database_profile_id}")
+                        else:
+                            logger.warning(f"Failed to reconnect to database profile {database_profile_id}, using default")
+                    else:
+                        logger.warning(f"Failed to refresh connection for database profile {database_profile_id}, using default")
+                else:
+                    logger.warning(f"Database profile {database_profile_id} not found, using default")
         
         # Загружаем примеры из test_queries.json
         test_queries = await cache_warmup.load_test_queries()
 
-        # Если указан конкретный профиль БД, адаптируем примеры под его схему
+        # Если указан конкретный профиль БД, проверяем нужна ли адаптация
         if database_profile_id:
-            try:
-                # Адаптируем существующие примеры под схему выбранной БД
-                adapted_examples = await example_generator.generate_examples_with_llm_for_database(analyzer, database_profile_id)
-                if adapted_examples:
-                    # Заменяем стандартные примеры на адаптированные
-                    test_queries = adapted_examples
-                    logger.info(f"Adapted {len(adapted_examples)} examples for database profile {database_profile_id}")
-            except Exception as e:
-                logger.warning(f"Failed to adapt examples for database profile: {e}")
-                # В случае ошибки используем стандартные примеры
+            # Получаем профиль для проверки
+            profile = profile_manager.get_profile(database_profile_id)
+            if profile and profile.name == "Default Database":
+                # Для Default Database используем стандартные примеры без LLM адаптации
+                logger.info(f"Using standard examples for Default Database profile {database_profile_id}")
+            else:
+                # Для внешних БД (например, RNA Central) адаптируем примеры под их схему
+                try:
+                    adapted_examples = await example_generator.generate_examples_with_llm_for_database(analyzer, database_profile_id)
+                    if adapted_examples:
+                        # Заменяем стандартные примеры на адаптированные
+                        test_queries = adapted_examples
+                        logger.info(f"Adapted {len(adapted_examples)} examples for external database profile {database_profile_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to adapt examples for database profile: {e}")
+                    # В случае ошибки используем стандартные примеры
         else:
             # Для основной БД используем стандартные примеры
             # Если примеров мало, пытаемся сгенерировать дополнительные с помощью LLM

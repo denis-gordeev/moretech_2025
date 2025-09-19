@@ -45,8 +45,8 @@ class ExampleGenerator:
         адаптируя существующие примеры под новую схему БД
         """
         try:
-            # Создаем ключ кэша на основе URL базы данных
-            cache_key = analyzer.database_url
+            # Создаем ключ кэша на основе ID профиля базы данных
+            cache_key = database_profile_id or analyzer.database_url
             
             # Проверяем кэш
             if cache_key in self._adapted_examples_cache:
@@ -425,8 +425,15 @@ class ExampleGenerator:
         # Добавляем пример использования
         if tables_info:
             tables_info.append("\nПРИМЕР ИСПОЛЬЗОВАНИЯ:")
-            tables_info.append("Используй полные имена таблиц: rnacen.table_name")
-            tables_info.append("Пример: SELECT * FROM rnacen.auth_permission WHERE name = 'test'")
+            # Определяем схему на основе первой таблицы
+            first_table = db_structure.get('tables', [{}])[0]
+            table_name = first_table.get('name', 'table_name')
+            if '.' in table_name:
+                schema_prefix = table_name.split('.')[0] + '.'
+            else:
+                schema_prefix = ""
+            tables_info.append(f"Используй полные имена таблиц: {schema_prefix}table_name")
+            tables_info.append(f"Пример: SELECT * FROM {schema_prefix}{table_name.split('.')[-1]} WHERE id = 1")
 
         # Создаем список шаблонных примеров (берем только 5 самых важных)
         template_list = []
@@ -447,15 +454,17 @@ class ExampleGenerator:
 {chr(10).join(template_list)}
 
 ЗАДАЧА: 
-1. Замени названия таблиц на соответствующие из новой схемы (используй полные имена с схемой, например rnacen.table_name)
+1. Замени названия таблиц на соответствующие из новой схемы (используй точные имена таблиц из схемы выше)
 2. Замени названия колонок на соответствующие из новой схемы
 3. Сохрани логику и структуру запросов
 4. Адаптируй описания под предметную область новой БД
 
 ПРАВИЛА МАППИНГА:
-- Если в шаблоне есть таблица 'users' -> используй rnacen.auth_permission или rnacen.blog
-- Если в шаблоне есть таблица 'orders' -> используй rnacen.ensembl_assembly или rnacen.cpat_results  
-- Если в шаблоне есть таблица 'order_items' -> используй rnacen.go_term_annotations или rnacen.ensembl_compara
+- Используй ТОЛЬКО таблицы из схемы выше
+- Замени названия таблиц на соответствующие из новой схемы
+- Если в шаблоне есть таблица 'users' -> найди подходящую таблицу в новой схеме
+- Если в шаблоне есть таблица 'orders' -> найди подходящую таблицу в новой схеме
+- Если в шаблоне есть таблица 'order_items' -> найди подходящую таблицу в новой схеме
 - Выбирай таблицы с подходящими колонками (id, name, content, etc.)
 
 ВАЖНО: Используй ТОЛЬКО таблицы и колонки из предоставленной схемы БД!
