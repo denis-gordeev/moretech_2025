@@ -1916,5 +1916,431 @@
       "Все три запроса могут быть объединены в один, если требуется получить данные в виде отчета. Это снизит количество обращений к системным представлениям и уменьшит общую нагрузку на сервер."
     ],
     "status": "llm_analysis_ready"
+  },
+  "37d7c0edc6c4272d60491b864e6be97b": {
+    "query": "SELECT u.name, COUNT(o.id) as order_count, SUM(o.total_amount) as total_spent FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE u.is_active = true GROUP BY u.id, u.name ORDER BY total_spent DESC",
+    "rewritten_query": "SELECT u.name, COUNT(o.id) as order_count, SUM(o.total_amount) as total_spent FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE u.is_active = true GROUP BY u.id, u.name ORDER BY total_spent DESC LIMIT 100;",
+    "resource_metrics": {
+      "cpu_usage": 15.0,
+      "memory_usage": 0.5,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 345,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.95,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс на users.is_active",
+        "description": "Создание индекса на поле users.is_active для ускорения фильтрации активных пользователей",
+        "potential_improvement": "Уменьшение времени сканирования таблицы users, особенно при большом количестве строк. Это сократит объём данных, участвующих в JOIN.",
+        "implementation": "CREATE INDEX idx_users_is_active ON users(is_active);",
+        "estimated_speedup": 30.0
+      },
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Индекс на orders.user_id",
+        "description": "Создание индекса на поле orders.user_id для оптимизации JOIN операции",
+        "potential_improvement": "Ускорение выполнения LEFT JOIN между users и orders, особенно при большом количестве записей в orders. Позволит избежать Seq Scan и использовать Index Scan.",
+        "implementation": "CREATE INDEX idx_orders_user_id ON orders(user_id);",
+        "estimated_speedup": 40.0
+      },
+      {
+        "type": "index",
+        "priority": "medium",
+        "title": "Индекс на orders.total_amount",
+        "description": "Создание индекса на поле orders.total_amount для ускорения агрегации SUM",
+        "potential_improvement": "Ускорит вычисление SUM(o.total_amount), особенно если таблица orders содержит миллионы строк. Также полезно для сортировки и фильтрации.",
+        "implementation": "CREATE INDEX idx_orders_total_amount ON orders(total_amount);",
+        "estimated_speedup": 15.0
+      },
+      {
+        "type": "db_configuration",
+        "priority": "medium",
+        "title": "Обновление статистики",
+        "description": "Обновление статистики таблиц users и orders для более точного планирования запроса",
+        "potential_improvement": "Позволит оптимизатору лучше оценить количество строк и выбрать более эффективный план выполнения.",
+        "implementation": "ANALYZE users; ANALYZE orders;",
+        "estimated_speedup": 5.0
+      },
+      {
+        "type": "query_rewrite",
+        "priority": "medium",
+        "title": "Добавление LIMIT",
+        "description": "Использование LIMIT для ограничения объёма результата, если требуется только верхушка топ-пользователей",
+        "potential_improvement": "Сокращение объёма обработки данных и уменьшение нагрузки на сортировку. Особенно полезно при большом количестве пользователей.",
+        "implementation": "SELECT u.name, COUNT(o.id) as order_count, SUM(o.total_amount) as total_spent FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE u.is_active = true GROUP BY u.id, u.name ORDER BY total_spent DESC LIMIT 100;",
+        "estimated_speedup": 20.0
+      },
+      {
+        "type": "db_configuration",
+        "priority": "medium",
+        "title": "Материализованное представление",
+        "description": "Использование материализованных представлений для часто запрашиваемых агрегатов",
+        "potential_improvement": "Значительно ускорит выполнение запроса, особенно если он запускается часто. Агрегаты будут храниться в готовом виде.",
+        "implementation": "CREATE MATERIALIZED VIEW user_order_stats AS SELECT u.id, u.name, COUNT(o.id) as order_count, SUM(o.total_amount) as total_spent FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE u.is_active = true GROUP BY u.id, u.name; REFRESH MATERIALIZED VIEW user_order_stats;",
+        "estimated_speedup": 60.0
+      }
+    ],
+    "warnings": [
+      "Потенциальная проблема с оценкой количества строк: план показывает 85 строк для users, но статистика указывает только 3 строки. Это может быть связано с устаревшей статистикой или неправильной оценкой оптимизатора.",
+      "Отсутствие индексов на условиях JOIN и WHERE приводит к полному сканированию таблиц (Seq Scan), что снижает производительность при больших объёмах данных.",
+      "Полная сортировка всех строк после агрегации может быть дорогостоящей при увеличении объёма данных. Рекомендуется использовать LIMIT, если не требуется полный результат."
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "8cd157a138f02c8dacf7011a6edbb7fe": {
+    "query": "SELECT id, name, content_type_id FROM auth_permission LIMIT 50",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 0.5,
+      "memory_usage": 0.8,
+      "io_operations": 1,
+      "disk_reads": 1,
+      "disk_writes": 0,
+      "disk_io": 0.5,
+      "network_io": 0.0,
+      "execution_time": 0.1,
+      "rows_processed": 50,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 95.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index_optimization",
+        "priority": "low",
+        "title": "Создание индекса для частых запросов с LIMIT",
+        "description": "Для ускорения запросов с LIMIT можно создать индекс на часто используемые поля",
+        "potential_improvement": "10-15%",
+        "implementation": "CREATE INDEX IF NOT EXISTS idx_auth_permission_columns ON auth_permission(id, name, content_type_id)",
+        "estimated_speedup": 0.2
+      },
+      {
+        "type": "statistics_maintenance",
+        "priority": "medium",
+        "title": "Обновление статистики таблицы",
+        "description": "Статистика показывает 105 строк, но фактическое количество может отличаться",
+        "potential_improvement": "5-10%",
+        "implementation": "ANALYZE auth_permission;",
+        "estimated_speedup": 0.1
+      }
+    ],
+    "warnings": [
+      "Внимание: Разница между оценкой строк (105) и фактическим количеством (0) указывает на возможную устаревшую статистику",
+      "Предупреждение: Последовательное сканирование (Seq Scan) используется вместо индексного сканирования, хотя таблица небольшая"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "b59811d5d6cc9e4ef62723486ade662e": {
+    "query": "SELECT id, urs_taxid FROM bad_precompute LIMIT 50",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 5.0,
+      "memory_usage": 2.0,
+      "io_operations": 1,
+      "disk_reads": 1,
+      "disk_writes": 0,
+      "disk_io": 0.5,
+      "network_io": 0.0,
+      "execution_time": 0.5,
+      "rows_processed": 50,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "high",
+        "title": "Создание индекса для ускорения LIMIT операций",
+        "description": "Для таблицы bad_precompute рекомендуется создать индекс на поле id, так как запрос использует LIMIT без WHERE условий. Это позволит быстрее получить первые 50 строк.",
+        "potential_improvement": "80-90%",
+        "implementation": "CREATE INDEX idx_bad_precompute_id ON bad_precompute(id);",
+        "estimated_speedup": 0.4
+      },
+      {
+        "type": "statistics",
+        "priority": "medium",
+        "title": "Обновление статистики таблицы",
+        "description": "Статистика показывает 0 строк в результатах, но план выполнения указывает на 8817 строк в таблице. Необходимо обновить статистику для точного планирования запросов.",
+        "potential_improvement": "20-30%",
+        "implementation": "ANALYZE bad_precompute;",
+        "estimated_speedup": 0.1
+      },
+      {
+        "type": "monitoring",
+        "priority": "low",
+        "title": "Мониторинг размера таблицы",
+        "description": "Таблица bad_precompute содержит 8817 строк. Рекомендуется мониторить рост таблицы и рассмотреть партиционирование при значительном увеличении размера.",
+        "potential_improvement": "10-15%",
+        "implementation": "Регулярно проверять pg_class.reltuples для таблицы",
+        "estimated_speedup": 0.05
+      }
+    ],
+    "warnings": [
+      "Внимание: Отсутствие индекса приводит к полному последовательному сканированию таблицы (Seq Scan)",
+      "Предупреждение: Несоответствие статистики - план показывает 8817 строк, но результат 0 строк",
+      "Потенциальная проблема: При увеличении размера таблицы производительность LIMIT запросов будет ухудшаться"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "d70334429eb9ec4e583512beff0da83e": {
+    "query": "SELECT id, title, content FROM blog LIMIT 50",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 1.0,
+      "memory_usage": 0.1,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 50,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 100.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index_creation",
+        "priority": "low",
+        "title": "Создание индекса для оптимизации последовательного сканирования",
+        "description": "Добавление индекса на таблицу blog для ускорения последовательного чтения",
+        "potential_improvement": "medium",
+        "implementation": "CREATE INDEX IF NOT EXISTS idx_blog_scan_order ON blog(id);",
+        "estimated_speedup": 10.0
+      }
+    ],
+    "warnings": [
+      "Внимание: Таблица blog содержит всего 1 строку (согласно статистике планировщика), что может указывать на устаревшую статистику таблицы",
+      "Предупреждение: При увеличении размера таблицы последовательное сканирование (Seq Scan) станет менее эффективным"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "ad68700324e15de7c4f4147c9bdc7436": {
+    "query": "SELECT * FROM auth_permission a JOIN bad_precompute b ON a.id = b.id LIMIT 50",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 15.0,
+      "memory_usage": 2.0,
+      "io_operations": 3,
+      "disk_reads": 105,
+      "disk_writes": 0,
+      "disk_io": 105.0,
+      "network_io": 0.0,
+      "execution_time": 0.005,
+      "rows_processed": 50,
+      "index_usage": 2.0,
+      "cache_hit_ratio": 95.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index_optimization",
+        "priority": "medium",
+        "title": "Оптимизация индекса для bad_precompute",
+        "description": "Индекс bad_precompute_pkey имеет высокую стоимость (238.54) при сканировании 8817 строк. Рекомендуется проверить фрагментацию индекса и выполнить REINDEX",
+        "potential_improvement": "30-40%",
+        "implementation": "REINDEX TABLE bad_precompute; ANALYZE bad_precompute;",
+        "estimated_speedup": 35.0
+      },
+      {
+        "type": "query_optimization",
+        "priority": "low",
+        "title": "Явное указание столбцов вместо SELECT *",
+        "description": "Использование SELECT * может возвращать избыточные данные. Укажите только необходимые столбцы для уменьшения объема передаваемых данных",
+        "potential_improvement": "5-10%",
+        "implementation": "Заменить SELECT * на явный перечень столбцов: SELECT a.column1, a.column2, b.column3, ...",
+        "estimated_speedup": 8.0
+      },
+      {
+        "type": "statistics_maintenance",
+        "priority": "low",
+        "title": "Обновление статистики таблиц",
+        "description": "План показывает 0 строк результата при стоимости 5.88, что может указывать на устаревшую статистику",
+        "potential_improvement": "5-15%",
+        "implementation": "Выполнить ANALYZE auth_permission; ANALYZE bad_precompute;",
+        "estimated_speedup": 10.0
+      }
+    ],
+    "warnings": [
+      "Высокая стоимость сканирования индекса bad_precompute_pkey (238.54) при относительно небольшом количестве строк (8817)",
+      "План показывает 0 строк результата при общей стоимости 5.88 - возможна неактуальная статистика таблиц",
+      "Merge Join может быть не оптимальным выбором для небольших объемов данных - рассмотрите Nested Loop Join",
+      "index_fragmentation_warning",
+      "statistics_outdated_warning",
+      "join_method_suboptimal"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "71c48c0d5c6bacec69a2ca708798e454": {
+    "query": "SELECT * FROM bad_precompute a JOIN blog b ON a.id = b.id LIMIT 50",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 5.0,
+      "memory_usage": 2.0,
+      "io_operations": 3,
+      "disk_reads": 2,
+      "disk_writes": 0,
+      "disk_io": 2.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 1,
+      "index_usage": 1.0,
+      "cache_hit_ratio": 90.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index_optimization",
+        "priority": "low",
+        "title": "Проверка полноты индекса bad_precompute_pkey",
+        "description": "Индекс используется для JOIN операции, но убедитесь, что он покрывает все необходимые столбцы",
+        "potential_improvement": "5-10%",
+        "implementation": "Проверить состав индекса: CREATE INDEX IF NOT EXISTS bad_precompute_pkey ON bad_precompute(id) INCLUDE (другие_часто_используемые_столбцы)",
+        "estimated_speedup": 5.0
+      },
+      {
+        "type": "statistics_maintenance",
+        "priority": "medium",
+        "title": "Обновление статистики таблиц",
+        "description": "Статистика показывает 0 строк результата при стоимости 4.31, что может указывать на устаревшую статистику",
+        "potential_improvement": "15-25%",
+        "implementation": "Выполнить: ANALYZE bad_precompute; ANALYZE blog;",
+        "estimated_speedup": 20.0
+      },
+      {
+        "type": "query_optimization",
+        "priority": "high",
+        "title": "Явное указание необходимых столбцов вместо SELECT *",
+        "description": "SELECT * возвращает все столбцы, что увеличивает объем передаваемых данных и нагрузку на I/O",
+        "potential_improvement": "30-50%",
+        "implementation": "Заменить SELECT * на конкретные имена столбцов: SELECT a.col1, a.col2, b.col1, b.col2 FROM ...",
+        "estimated_speedup": 40.0
+      }
+    ],
+    "warnings": [
+      "Внимание: SELECT * возвращает избыточные данные. Рекомендуется явно указывать только необходимые столбцы",
+      "Предупреждение: Статистика показывает 0 строк результата при ненулевой стоимости выполнения, что может указывать на устаревшую статистику таблиц",
+      "Потенциальная проблема: Отсутствие индекса на blog.id для оптимизации JOIN операции"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "080517c1000772cad57f07d93e1ac5c1": {
+    "query": "SELECT * FROM blog a JOIN cpat_results b ON a.id = b.urs_taxid LIMIT 50",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 0.0,
+      "memory_usage": 0.0,
+      "io_operations": 0,
+      "disk_reads": 0,
+      "disk_writes": 0,
+      "disk_io": 0.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 0,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 0.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "diagnostic",
+        "priority": "high",
+        "title": "Проверка доступности таблиц",
+        "description": "Проверьте существование таблиц blog и cpat_results и их доступность",
+        "potential_improvement": "high",
+        "implementation": "Выполните: SELECT * FROM blog LIMIT 1; SELECT * FROM cpat_results LIMIT 1;",
+        "estimated_speedup": 100.0
+      },
+      {
+        "type": "index",
+        "priority": "medium",
+        "title": "Создание индексов для JOIN",
+        "description": "Создайте индексы для полей JOIN после восстановления таблиц",
+        "potential_improvement": "medium",
+        "implementation": "CREATE INDEX IF NOT EXISTS idx_blog_id ON blog(id); CREATE INDEX IF NOT EXISTS idx_cpat_results_urs_taxid ON cpat_results(urs_taxid);",
+        "estimated_speedup": 50.0
+      },
+      {
+        "type": "query_rewrite",
+        "priority": "low",
+        "title": "Оптимизация списка столбцов",
+        "description": "Укажите конкретные столбцы вместо SELECT * для уменьшения объема передаваемых данных",
+        "potential_improvement": "low",
+        "implementation": "Замените SELECT * на явное перечисление необходимых столбцов",
+        "estimated_speedup": 20.0
+      }
+    ],
+    "warnings": [
+      "КРИТИЧЕСКАЯ ОШИБКА: План выполнения показывает ошибку (node_type: Error). Таблицы могут быть недоступны или не существуют",
+      "Невозможно оценить производительность: Запрос не выполняется из-за ошибки в плане выполнения",
+      "Проверьте права доступа к таблицам blog и cpat_results",
+      "Убедитесь, что таблицы существуют в текущей схеме"
+    ],
+    "status": "llm_analysis_ready"
+  },
+  "97043a29b0072ec9bed2565a11e81f44": {
+    "query": "SELECT id, COUNT(*) AS cnt FROM auth_permission GROUP BY id ORDER BY cnt DESC LIMIT 50",
+    "rewritten_query": null,
+    "resource_metrics": {
+      "cpu_usage": 5.0,
+      "memory_usage": 2.0,
+      "io_operations": 1,
+      "disk_reads": 1,
+      "disk_writes": 0,
+      "disk_io": 1.0,
+      "network_io": 0.0,
+      "execution_time": 0.0,
+      "rows_processed": 105,
+      "index_usage": 0.0,
+      "cache_hit_ratio": 95.0,
+      "lock_contention": 0.0
+    },
+    "recommendations": [
+      {
+        "type": "index",
+        "priority": "low",
+        "title": "Создание индекса для GROUP BY операции",
+        "description": "Создание индекса на поле id может ускорить агрегацию, но учитывая малый размер таблицы (105 строк), эффект будет минимальным",
+        "potential_improvement": "5-10%",
+        "implementation": "CREATE INDEX idx_auth_permission_id ON auth_permission(id)",
+        "estimated_speedup": 0.1
+      },
+      {
+        "type": "monitoring",
+        "priority": "medium",
+        "title": "Мониторинг роста таблицы",
+        "description": "Сейчас таблица небольшая (105 строк), но при увеличении размера рекомендуется пересмотреть индексы",
+        "potential_improvement": "Профилактическая мера",
+        "implementation": "Регулярно проверять размер таблицы и статистику выполнения запросов",
+        "estimated_speedup": 0.0
+      },
+      {
+        "type": "statistics",
+        "priority": "low",
+        "title": "Обновление статистики таблицы",
+        "description": "Обновление статистики может улучшить планирование запросов, хотя текущий план уже оптимален",
+        "potential_improvement": "2-5%",
+        "implementation": "ANALYZE auth_permission",
+        "estimated_speedup": 0.05
+      }
+    ],
+    "warnings": [
+      "Внимание: Отсутствие индекса для GROUP BY операции - при росте таблицы может стать проблемой",
+      "Предупреждение: Последовательное сканирование (Seq Scan) используется вместо индексного, но это оптимально для маленькой таблицы",
+      "Мониторинг: При увеличении размера таблицы свыше 10,000 строк рекомендуется создать индекс"
+    ],
+    "status": "llm_analysis_ready"
   }
 }

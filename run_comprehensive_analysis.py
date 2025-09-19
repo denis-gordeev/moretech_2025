@@ -125,10 +125,6 @@ async def main():
             print("❌ No database profiles found")
             return
 
-        # Используем первый профиль
-        first_profile = profiles[0]
-        print(f"📊 Using database profile: {first_profile['name']} ({first_profile['id']})")
-
         print("🤖 Fetching available models...")
         models = await fetch_models(session)
         if not models:
@@ -139,35 +135,36 @@ async def main():
         for model in models:
             print(f"  - {model['name']}")
 
-        print("📑 Fetching query examples...")
-        examples = await fetch_examples(session, first_profile["id"])
-        if not examples:
-            print("❌ No examples found")
-            return
-
-        print(f"📊 Found {len(examples)} query examples")
-
-        # Создаем задачи для всех комбинаций
-        total_tasks = len(models) * len(examples)
-        print(f"🔄 Starting {total_tasks} analysis tasks with semaphore(10)...")
-
+        # Собираем задачи для всех профилей БД
+        all_tasks = []
         semaphore = asyncio.Semaphore(10)
-        tasks = []
+        profile_summaries = []
 
-        for model in models:
-            for example in examples:
-                task = analyze_single_query(
-                    session=session,
-                    database_profile_id=first_profile["id"],
-                    model_name=model["name"],
-                    query=example["query"],
-                    semaphore=semaphore,
-                )
-                tasks.append(task)
+        for profile in profiles:
+            print(f"\n📊 Using database profile: {profile['name']} ({profile['id']})")
+            print("📑 Fetching query examples...")
+            examples = await fetch_examples(session, profile["id"])
+            if not examples:
+                print("❌ No examples found for this profile")
+                continue
+
+            print(f"📊 Found {len(examples)} query examples for {profile['name']}")
+            profile_summaries.append({"profile": profile, "examples": len(examples)})
+
+            for model in models:
+                for example in examples:
+                    task = analyze_single_query(
+                        session=session,
+                        database_profile_id=profile["id"],
+                        model_name=model["name"],
+                        query=example["query"],
+                        semaphore=semaphore,
+                    )
+                    all_tasks.append(task)
 
         # Запускаем все задачи
         start_time = time.time()
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*all_tasks, return_exceptions=True)
         end_time = time.time()
 
         # Обрабатываем результаты
@@ -197,10 +194,12 @@ async def main():
                     "metadata": {
                         "timestamp": time.time(),
                         "duration_seconds": end_time - start_time,
-                        "database_profile": first_profile,
+                        "profiles": [s["profile"] for s in profile_summaries],
                         "total_models": len(models),
-                        "total_examples": len(examples),
-                        "total_tasks": total_tasks,
+                        "total_examples_by_profile": {
+                            s["profile"]["id"]: s["examples"] for s in profile_summaries
+                        },
+                        "total_tasks": len(all_tasks),
                         "successful_results": len(successful_results),
                         "failed_results": failed_count,
                     },

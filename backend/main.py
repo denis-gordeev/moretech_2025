@@ -178,7 +178,7 @@ async def startup_precompute_execution_plans():
         
         # Предварительно вычисляем планы выполнения для всех профилей баз данных
         result = await execution_plan_cache.precompute_for_all_database_profiles(
-            profile_manager, test_queries, max_queries_per_db=5
+            profile_manager, test_queries, max_queries_per_db=len(test_queries)
         )
         
         logger.info(f"Execution plan pre-computation completed: {result['total_processed']} total processed, {result['total_errors']} total errors across {result['total_profiles']} database profiles")
@@ -264,7 +264,8 @@ async def startup_example_generation():
                 logger.info("Starting additional cache warmup for newly generated examples...")
                 try:
                     # Кэшируем только новые примеры (пропускаем уже закэшированные)
-                    additional_result = await cache_warmup.warmup_new_examples(max_queries=5)
+                    # Кэшируем все новые примеры, без ограничения до 5
+                    additional_result = await cache_warmup.warmup_new_examples(max_queries=len(all_examples))
                     logger.info(f"Additional cache warmup completed: {additional_result['processed']} new queries cached")
                 except Exception as e:
                     logger.error(f"Additional cache warmup failed: {e}")
