@@ -9,18 +9,17 @@ import HealthStatus from './components/HealthStatus';
 import RewrittenQuery from './components/RewrittenQuery';
 import ModelSelector from './components/ModelSelector';
 import DatabaseProfiles from './components/DatabaseProfiles';
+import QueryStructure from './components/QueryStructure';
 import { queryAnalyzerAPI } from './services/api';
 
 function App() {
   const [query, setQuery] = useState('');
   const [analysis, setAnalysis] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingExecutionPlan, setIsLoadingExecutionPlan] = useState(false);
   const [isLoadingLLM, setIsLoadingLLM] = useState(false);
   const [error, setError] = useState(null);
   const [examples, setExamples] = useState([]);
   const [activeTab, setActiveTab] = useState('query');
-  const [currentModel, setCurrentModel] = useState(null);
   const [selectedDatabase, setSelectedDatabase] = useState(null);
 
   // Загружаем примеры запросов при инициализации и при смене базы данных
@@ -43,7 +42,6 @@ function App() {
     }
 
     setIsLoading(true);
-    setIsLoadingExecutionPlan(true);
     setIsLoadingLLM(false);
     setError(null);
     setAnalysis(null);
@@ -68,7 +66,6 @@ function App() {
         rewritten_query: null
       });
       setActiveTab('results');
-      setIsLoadingExecutionPlan(false);
       setIsLoadingLLM(true);
 
       // Шаг 2: Получаем LLM анализ (медленный ответ)
@@ -96,7 +93,6 @@ function App() {
       );
     } finally {
       setIsLoading(false);
-      setIsLoadingExecutionPlan(false);
       setIsLoadingLLM(false);
     }
   };
@@ -253,6 +249,11 @@ function App() {
                   <Warnings warnings={analysis.warnings} />
                 )}
               </>
+            )}
+
+            {/* Query Structure - показываем всегда когда есть анализ */}
+            {analysis && analysis.query && (
+              <QueryStructure query={analysis.query} />
             )}
 
             {/* Analysis Info */}
