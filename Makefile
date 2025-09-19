@@ -24,14 +24,27 @@ install: ## Install dependencies for both backend and frontend
 	@echo "Installing frontend dependencies..."
 	cd frontend && npm install
 
-# Container engine detection
-# Check if podman-compose is available, otherwise use docker-compose
-ifeq ($(shell which podman-compose >/dev/null 2>&1 && echo "podman-compose"),podman-compose)
-    COMPOSE_CMD = podman-compose
-    DEV_COMPOSE_FILE = docker-compose.podman.yml
+# Container engine detection (allow override via COMPOSE_CMD)
+ifeq ($(origin COMPOSE_CMD), undefined)
+    ifneq ($(shell docker compose version >/dev/null 2>&1 && echo yes),)
+        COMPOSE_CMD = docker compose
+        DEV_COMPOSE_FILE = docker-compose.dev.yml
+    else ifneq ($(shell command -v docker-compose >/dev/null 2>&1 && echo yes),)
+        COMPOSE_CMD = docker-compose
+        DEV_COMPOSE_FILE = docker-compose.dev.yml
+    else ifneq ($(shell podman compose version >/dev/null 2>&1 && echo yes),)
+        COMPOSE_CMD = podman compose
+        DEV_COMPOSE_FILE = docker-compose.podman.yml
+    else ifneq ($(shell command -v podman-compose >/dev/null 2>&1 && echo yes),)
+        COMPOSE_CMD = podman-compose
+        DEV_COMPOSE_FILE = docker-compose.podman.yml
+    else
+        $(error No supported compose command found. Install Docker Compose or Podman Compose, or set COMPOSE_CMD explicitly.)
+    endif
 else
-    COMPOSE_CMD = docker-compose
-    DEV_COMPOSE_FILE = docker-compose.dev.yml
+    ifeq ($(origin DEV_COMPOSE_FILE), undefined)
+        DEV_COMPOSE_FILE = docker-compose.dev.yml
+    endif
 endif
 
 # Docker/Podman commands
