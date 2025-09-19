@@ -1,0 +1,104 @@
+{
+  "test_queries": [
+    {
+      "name": "Simple user lookup",
+      "query": "SELECT * FROM users WHERE id = 1",
+      "description": "Basic user lookup by ID"
+    },
+    {
+      "name": "User orders summary",
+      "query": "SELECT u.name, COUNT(o.id) as order_count, SUM(o.total_amount) as total_spent FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE u.is_active = true GROUP BY u.id, u.name ORDER BY total_spent DESC",
+      "description": "User statistics with order aggregation"
+    },
+    {
+      "name": "Complex subquery analysis",
+      "query": "SELECT * FROM users WHERE id IN (SELECT user_id FROM orders WHERE total_amount > (SELECT AVG(total_amount) FROM orders))",
+      "description": "Users with above-average order values"
+    },
+    {
+      "name": "Sequential order processing chain",
+      "query": "BEGIN; UPDATE inventory SET quantity = quantity - 1 WHERE product_id = 123; INSERT INTO orders (user_id, product_id, quantity, total_amount) VALUES (1, 123, 1, 99.99); COMMIT;",
+      "description": "Transaction chain for order processing"
+    },
+    {
+      "name": "Data analysis chain",
+      "query": "CREATE TEMP TABLE order_stats AS SELECT user_id, COUNT(*) as order_count, AVG(total_amount) as avg_amount FROM orders GROUP BY user_id; SELECT u.name, os.order_count, os.avg_amount FROM users u JOIN order_stats os ON u.id = os.user_id WHERE os.order_count > 5; DROP TABLE order_stats;",
+      "description": "Multi-step data analysis with temporary table"
+    },
+    {
+      "name": "Bulk update chain",
+      "query": "UPDATE products SET price = price * 1.1 WHERE category = 'electronics'; UPDATE products SET price = price * 1.05 WHERE category = 'books'; UPDATE products SET updated_at = NOW() WHERE category IN ('electronics', 'books');",
+      "description": "Bulk price updates across multiple categories"
+    },
+    {
+      "name": "Product analytics",
+      "query": "SELECT p.name, p.price, COUNT(oi.product_id) as times_ordered FROM products p LEFT JOIN order_items oi ON p.id = oi.product_id GROUP BY p.id, p.name, p.price ORDER BY times_ordered DESC LIMIT 10",
+      "description": "Top 10 most ordered products"
+    },
+    {
+      "name": "Customer segmentation",
+      "query": "WITH customer_metrics AS (SELECT user_id, COUNT(*) as order_count, SUM(total_amount) as total_spent, AVG(total_amount) as avg_order FROM orders WHERE created_at >= NOW() - INTERVAL '1 year' GROUP BY user_id) SELECT CASE WHEN total_spent > 1000 THEN 'Premium' WHEN total_spent > 500 THEN 'Standard' ELSE 'Basic' END as segment, COUNT(*) as customer_count, AVG(avg_order) as segment_avg_order FROM customer_metrics GROUP BY segment",
+      "description": "Customer segmentation analysis based on spending"
+    },
+    {
+      "name": "Inventory management chain",
+      "query": "SELECT product_id, quantity FROM inventory WHERE quantity < 10; UPDATE inventory SET quantity = quantity + 100 WHERE quantity < 10; INSERT INTO restock_log (product_id, quantity_added, restocked_at) SELECT product_id, 100, NOW() FROM inventory WHERE quantity >= 100 AND quantity <= 110;",
+      "description": "Automated inventory restocking workflow"
+    },
+    {
+      "name": "Monthly report generation",
+      "query": "SELECT DATE_TRUNC('month', created_at) as month, COUNT(*) as order_count, SUM(total_amount) as revenue FROM orders WHERE created_at >= NOW() - INTERVAL '12 months' GROUP BY month ORDER BY month",
+      "description": "Monthly revenue and order count report"
+    },
+    {
+      "name": "User activity analysis",
+      "query": "SELECT u.id, u.name, u.email, MAX(o.created_at) as last_order, COUNT(o.id) as total_orders FROM users u LEFT JOIN orders o ON u.id = o.user_id GROUP BY u.id, u.name, u.email HAVING MAX(o.created_at) < NOW() - INTERVAL '6 months' OR MAX(o.created_at) IS NULL",
+      "description": "Identify inactive users for re-engagement campaigns"
+    },
+    {
+      "name": "Performance optimization test",
+      "query": "EXPLAIN (ANALYZE, BUFFERS) SELECT o.id, o.total_amount, u.name, p.name as product_name FROM orders o JOIN users u ON o.user_id = u.id JOIN order_items oi ON o.id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.created_at >= '2024-01-01' ORDER BY o.total_amount DESC LIMIT 100",
+      "description": "Complex join query with performance analysis"
+    },
+    {
+      "name": "Database cleanup chain",
+      "query": "DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE created_at < NOW() - INTERVAL '5 years'); DELETE FROM orders WHERE created_at < NOW() - INTERVAL '5 years'; VACUUM ANALYZE orders; VACUUM ANALYZE order_items;",
+      "description": "Data retention cleanup and maintenance"
+    },
+    {
+      "name": "Advanced aggregation",
+      "query": "SELECT p.category, COUNT(DISTINCT oi.order_id) as unique_orders, COUNT(oi.product_id) as total_items, SUM(oi.quantity * p.price) as category_revenue, RANK() OVER (ORDER BY SUM(oi.quantity * p.price) DESC) as revenue_rank FROM products p JOIN order_items oi ON p.id = oi.product_id GROUP BY p.category ORDER BY category_revenue DESC",
+      "description": "Category performance analysis with ranking"
+    },
+    {
+      "name": "Conditional data update chain",
+      "query": "UPDATE users SET loyalty_tier = 'Gold' WHERE id IN (SELECT user_id FROM orders GROUP BY user_id HAVING SUM(total_amount) > 5000); UPDATE users SET loyalty_tier = 'Silver' WHERE id IN (SELECT user_id FROM orders GROUP BY user_id HAVING SUM(total_amount) BETWEEN 1000 AND 5000) AND loyalty_tier IS NULL; UPDATE users SET loyalty_tier = 'Bronze' WHERE loyalty_tier IS NULL;",
+      "description": "Conditional loyalty tier assignment based on spending"
+    },
+    {
+      "name": "RNA sequence analysis (EBI compatible)",
+      "query": "SELECT rna_accession, sequence_length, COUNT(*) as variant_count FROM rna_sequences rs JOIN sequence_variants sv ON rs.id = sv.sequence_id WHERE sequence_length > 1000 GROUP BY rna_accession, sequence_length ORDER BY variant_count DESC LIMIT 20",
+      "description": "RNA sequence analysis for biological databases"
+    },
+    {
+      "name": "Genomic data processing chain (EBI compatible)",
+      "query": "CREATE TEMP TABLE gene_stats AS SELECT gene_id, COUNT(*) as expression_count, AVG(expression_level) as avg_expression FROM gene_expression WHERE experiment_type = 'RNA-seq' GROUP BY gene_id; SELECT g.gene_symbol, gs.expression_count, gs.avg_expression FROM genes g JOIN gene_stats gs ON g.id = gs.gene_id WHERE gs.avg_expression > 100 ORDER BY gs.avg_expression DESC; DROP TABLE gene_stats;",
+      "description": "Multi-step genomic data analysis workflow"
+    },
+    {
+      "name": "Protein interaction network",
+      "query": "WITH interaction_network AS (SELECT p1.protein_name as protein_a, p2.protein_name as protein_b, pi.interaction_score FROM protein_interactions pi JOIN proteins p1 ON pi.protein_a_id = p1.id JOIN proteins p2 ON pi.protein_b_id = p2.id WHERE pi.interaction_score > 0.8) SELECT protein_a, COUNT(*) as interaction_count, AVG(interaction_score) as avg_score FROM interaction_network GROUP BY protein_a ORDER BY interaction_count DESC LIMIT 50",
+      "description": "Protein-protein interaction network analysis"
+    },
+    {
+      "name": "Experimental data validation chain",
+      "query": "UPDATE experiments SET status = 'validated' WHERE id IN (SELECT experiment_id FROM experiment_results GROUP BY experiment_id HAVING COUNT(*) >= 3 AND MIN(quality_score) > 0.7); INSERT INTO validation_log (experiment_id, validated_at, criteria_met) SELECT id, NOW(), 'minimum_samples_and_quality' FROM experiments WHERE status = 'validated' AND updated_at > NOW() - INTERVAL '1 hour'; SELECT COUNT(*) as newly_validated FROM experiments WHERE status = 'validated' AND updated_at > NOW() - INTERVAL '1 hour';",
+      "description": "Automated experimental data validation workflow"
+    },
+    {
+      "name": "Cross-species comparison",
+      "query": "SELECT DISTINCT s1.species_name as species_a, s2.species_name as species_b, COUNT(*) as shared_genes FROM species s1 CROSS JOIN species s2 JOIN gene_orthology go ON (go.species_a_id = s1.id AND go.species_b_id = s2.id) WHERE s1.id < s2.id GROUP BY s1.species_name, s2.species_name HAVING COUNT(*) > 1000 ORDER BY shared_genes DESC",
+      "description": "Comparative genomics analysis across species"
+    }
+  ]
+}

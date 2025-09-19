@@ -1,53 +1,31 @@
-# LLM Cache Directory
+# Cache Directory
 
-This directory contains persistent cache files for LLM query analysis results.
+This directory contains persistent cache files that improve application startup performance.
 
-## File Structure
+## Files
 
-- `cache_<model_hash>.json` - Cache files for specific models
-- `cache_sample.json` - Example cache file format
-- `README.md` - This documentation
+- `cache_*.json` - LLM analysis cache files for different models
+- `execution_plans.json` - Cached execution plans for common queries
+- `rewritten_examples.json` - Collection of rewritten query examples
 
-## Cache File Format
+## Purpose
 
-Each cache file contains a JSON object where:
-- **Keys**: MD5 hashes of `model_name|query|execution_plan_summary`
-- **Values**: LLM analysis results including:
-  - `rewritten_query`: Optimized SQL query (or null)
-  - `resource_metrics`: CPU, memory, disk I/O estimates
-  - `recommendations`: Array of optimization recommendations
-  - `warnings`: Array of performance warnings
+These cache files are automatically generated during application startup and help:
 
-## Model Hash Mapping
+1. **Reduce startup time** - Pre-cached LLM analyses avoid repeated API calls
+2. **Improve response time** - Cached execution plans speed up query analysis
+3. **Preserve optimizations** - Rewritten queries are saved for reuse
+4. **Enable offline development** - Cached results work without API access
 
-- `cache_827b9586.json` - deepseek/deepseek-chat-v3.1
-- `cache_4f51dd04.json` - qwen/qwen3-32b
-- `cache_1347aa4b.json` - z-ai/glm-4.5
-- etc.
+## Maintenance
 
-## Benefits
+- Cache files are automatically updated during application startup
+- Files are safe to delete - they will be regenerated as needed
+- Keep cache files in version control for consistent team development
 
-1. **Faster Startup**: Pre-cached results load instantly
-2. **Reduced API Costs**: Avoid redundant LLM calls
-3. **Consistent Results**: Same query+model = same analysis
-4. **Offline Capability**: Works without LLM API for cached queries
+## Configuration
 
-## Cache Management
-
-- **Max Size**: 10,000 entries per model
-- **LRU Eviction**: Oldest entries removed when full
-- **Auto-Save**: Cache saved to files after each analysis
-- **Auto-Load**: Cache loaded from files at startup
-
-## Manual Cache Operations
-
-```bash
-# Warm up cache for all models
-curl -X POST "http://localhost:8000/cache/warmup/all-models?max_queries=20"
-
-# Check cache statistics
-curl -X GET "http://localhost:8000/cache/stats"
-
-# Clear cache
-curl -X POST "http://localhost:8000/cache/clear"
-```
+Cache behavior can be configured through:
+- `MAX_CACHE_SIZE` environment variable
+- `CACHE_EXPIRY_HOURS` environment variable
+- Startup parameters in `main.py`

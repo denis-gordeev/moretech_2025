@@ -66,8 +66,9 @@ example_generator = ExampleGenerator()
 table_stats_service = TableStatsService()
 execution_plan_cache = ExecutionPlanCache()
 
-# Глобальная переменная для хранения статистики таблиц
+# Глобальные переменные для хранения данных
 table_statistics = {}
+rewritten_examples_cache = []
 
 
 async def run_with_timeout(description: str, awaitable, timeout: float = 5.0) -> bool:
@@ -134,21 +135,55 @@ async def create_default_database_profiles():
         )
         
         if not rna_central_exists:
-            success, result = await profile_manager.create_profile(
-                name="RNA Central Database",
-                host="hh-pgsql-public.ebi.ac.uk",
-                port=5432,
-                database="pfmegrnargs",
-                username="reader",
-                password="NWDMCE5xdipIjRrp"
-            )
-            
-            if success:
-                logger.info(f"Created RNA Central database profile: {result}")
-            else:
-                logger.warning(f"Failed to create RNA Central database profile: {result}")
+            try:
+                success, result = await profile_manager.create_profile(
+                    name="RNA Central Database",
+                    host="hh-pgsql-public.ebi.ac.uk",
+                    port=5432,
+                    database="pfmegrnargs",
+                    username="reader",
+                    password="NWDMCE5xdipIjRrp"
+                )
+                
+                if success:
+                    logger.info(f"Created RNA Central database profile: {result}")
+                    # Test query chains specifically for this database
+                    try:
+                        connection = profile_manager.get_connection(result)
+                        if connection:
+                            analyzer = PostgreSQLAnalyzer(connection.get_connection_url())
+                            # Test a simple query chain to ensure it works
+                            test_chain = "SELECT 1 as test; SELECT 2 as test2;"
+                            main_query, all_text = extract_main_query(test_chain)
+                            logger.info(f"RNA Central DB query chain test - Main: '{main_query[:50]}...', Full: '{all_text[:100]}...'")
+                            if ";" in all_text:
+                                logger.info("Query chains are properly detected for RNA Central database")
+                            else:
+                                logger.warning("Query chains may not be working properly for RNA Central database")
+                    except Exception as chain_test_error:
+                        logger.warning(f"Could not test query chains for RNA Central database: {chain_test_error}")
+                else:
+                    logger.warning(f"Failed to create RNA Central database profile: {result}")
+            except Exception as rna_error:
+                logger.error(f"Error creating RNA Central database profile: {rna_error}")
         else:
             logger.info("RNA Central database profile already exists")
+            # Still test query chains for existing profile
+            try:
+                rna_profile = next(
+                    profile for profile in existing_profiles 
+                    if profile.name == "RNA Central Database"
+                )
+                connection = profile_manager.get_connection(rna_profile.id)
+                if connection:
+                    test_chain = "SELECT 1 as test; SELECT 2 as test2;"
+                    main_query, all_text = extract_main_query(test_chain)
+                    if ";" in all_text:
+                        logger.info("Query chains are working correctly for existing RNA Central database profile")
+                    else:
+                        logger.warning("Query chains may have issues with existing RNA Central database profile")
+            except Exception as existing_test_error:
+                logger.warning(f"Could not test existing RNA Central profile: {existing_test_error}")
             
     except Exception as e:
         logger.error(f"Error creating default database profiles: {e}")
@@ -187,6 +222,25 @@ async def startup_load_execution_plan_cache():
     except Exception as e:
         logger.error(f"Failed to load execution plan cache: {e}")
 
+
+async def startup_load_rewritten_examples():
+    """Загружает переписанные примеры при запуске"""
+    try:
+        logger.info("Loading rewritten examples at startup...")
+        rewritten_examples = await cache_warmup.load_rewritten_examples()
+        
+        if rewritten_examples:
+            logger.info(f"Loaded {len(rewritten_examples)} rewritten examples from cache")
+            # Можно добавить глобальную переменную для хранения переписанных примеров
+            global rewritten_examples_cache
+            rewritten_examples_cache = rewritten_examples
+        else:
+            logger.info("No rewritten examples found in cache")
+            rewritten_examples_cache = []
+            
+    except Exception as e:
+        logger.error(f"Failed to load rewritten examples: {e}")
+        rewritten_examples_cache = []
 
 async def startup_precompute_execution_plans():
     """Предварительно вычисляет планы выполнения для тестовых запросов"""
@@ -233,6 +287,9 @@ async def startup_event():
             # Загружаем кэш планов выполнения
             await startup_load_execution_plan_cache()
             
+            # Загружаем переписанные примеры
+            await startup_load_rewritten_examples()
+            
             # Предварительно вычисляем планы выполнения
             await startup_precompute_execution_plans()
             
@@ -254,8 +311,8 @@ async def startup_cache_warmup():
         logger.info("Waiting 15 seconds before starting cache warmup...")
         await asyncio.sleep(15)
 
-        logger.info("Starting background cache warmup for all models...")
-        result = await cache_warmup.warmup_cache_for_all_models(max_queries=20)  # Кэшируем все примеры для всех моделей при запуске
+        logger.info("Starting background cache warmup for all models with Semaphore(3)...")
+        result = await cache_warmup.warmup_cache_for_all_models(max_queries=20, max_concurrent=3)  # Кэшируем все примеры для всех моделей при запуске с семафором
 
         logger.info(f"Background cache warmup completed: {result['total_processed']} queries cached across {len(result['models'])} models")
 
