@@ -103,7 +103,6 @@ function App() {
   };
 
   const handleModelChange = (modelName) => {
-    setCurrentModel(modelName);
     // Очищаем предыдущий анализ при смене модели
     setAnalysis(null);
     setError(null);
