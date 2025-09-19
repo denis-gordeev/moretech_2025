@@ -93,6 +93,11 @@ class ExampleGenerator:
             # Адаптируем примеры под новую схему БД
             adapted_examples = await self._adapt_examples_to_database_schema(template_examples, db_structure)
 
+            # Если LLM не вернул примеры, создаем базовые примеры на основе структуры БД
+            if not adapted_examples:
+                logger.warning("LLM returned no adapted examples; generating basic examples from schema")
+                adapted_examples = self._generate_basic_schema_examples(db_structure)
+
             # Сохраняем в кэш
             self._adapted_examples_cache[cache_key] = adapted_examples
 
@@ -103,6 +108,99 @@ class ExampleGenerator:
             logger.error(f"Failed to adapt examples for database: {e}")
             return []
 
+    def _generate_basic_schema_examples(self, db_structure: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Создает базовый набор примеров запросов на основе структуры БД,
+        без использования LLM. Полезно для внешних БД (например, RNA Central),
+        когда LLM-адаптация не сработала или отключена.
+        """
+        examples: List[Dict[str, Any]] = []
+        tables = db_structure.get("tables", [])
+        if not tables:
+            return examples
+
+        # Преобразуем в унифицированный формат имён и колонок
+        def table_full_name(t: Dict[str, Any]) -> str:
+            # Для _get_database_structure_for_analyzer формат: {name, schema}
+            name = t.get("name") or t.get("table_name")
+            schema = t.get("schema") or t.get("table_schema")
+            if name and schema and "." not in name and schema != "public":
+                return f"{schema}.{name}"
+            return name
+
+        def first_columns(t: Dict[str, Any]) -> List[str]:
+            cols = []
+            for c in t.get("columns", [])[:5]:
+                col_name = c.get("name") or c.get("column_name")
+                if col_name:
+                    cols.append(col_name)
+            return cols
+
+        # 1) Простые SELECT по первым таблицам
+        for t in tables[:3]:
+            full_name = table_full_name(t)
+            cols = first_columns(t)
+            select_cols = ", ".join(cols[:3]) if cols else "*"
+            examples.append({
+                "name": f"Simple SELECT from {full_name}",
+                "query": f"SELECT {select_cols} FROM {full_name} LIMIT 50",
+                "description": f"Базовый просмотр данных из таблицы {full_name}",
+                "category": "simple",
+                "difficulty": "easy",
+            })
+
+        # 2) Попробуем найти потенциальный внешний ключ для простого JOIN
+        for i in range(min(3, len(tables) - 1)):
+            t1 = tables[i]
+            t2 = tables[i + 1]
+            t1_name = table_full_name(t1)
+            t2_name = table_full_name(t2)
+
+            t1_cols = first_columns(t1)
+            t2_cols = first_columns(t2)
+
+            # Ищем вероятные ключи id/user_id/.., иначе берем первые столбцы
+            def guess_key(cols: List[str], preferred: List[str]) -> str:
+                for pref in preferred:
+                    for c in cols:
+                        if c.lower() == pref:
+                            return c
+                return cols[0] if cols else "id"
+
+            left_key = guess_key(t1_cols, ["id", "{t1_name}_id"])  # heuristic
+            right_key_options = [f"{t1_name.split('.')[-1]}_id", "id", f"{t2_name.split('.')[-1]}_id"]
+            right_key = guess_key(t2_cols, right_key_options)
+
+            examples.append({
+                "name": f"JOIN {t1_name} to {t2_name}",
+                "query": (
+                    f"SELECT * FROM {t1_name} a "
+                    f"JOIN {t2_name} b ON a.{left_key} = b.{right_key} "
+                    f"LIMIT 50"
+                ),
+                "description": f"Пример JOIN между таблицами {t1_name} и {t2_name}",
+                "category": "join",
+                "difficulty": "medium",
+            })
+
+        # 3) Пример агрегации по первой таблице
+        first_table = tables[0]
+        ft_name = table_full_name(first_table)
+        ft_cols = first_columns(first_table)
+        group_col = ft_cols[0] if ft_cols else "id"
+        examples.append({
+            "name": f"Aggregation on {ft_name}",
+            "query": (
+                f"SELECT {group_col}, COUNT(*) AS cnt FROM {ft_name} "
+                f"GROUP BY {group_col} ORDER BY cnt DESC LIMIT 50"
+            ),
+            "description": f"Базовый пример агрегации по таблице {ft_name}",
+            "category": "aggregation",
+            "difficulty": "easy",
+        })
+
+        return examples
+
     async def _get_database_structure(self) -> Dict[str, Any]:
         """Получает подробную структуру базы данных"""
         try:
@@ -110,6 +208,7 @@ class ExampleGenerator:
                 # Получаем информацию о таблицах и их колонках
                 tables_query = """
                 SELECT
+                    t.table_schema,
                     t.table_name,
                     t.table_type,
                     c.column_name,
@@ -275,7 +374,7 @@ class ExampleGenerator:
                 ) fk ON c.table_name = fk.table_name AND c.column_name = fk.column_name
                 WHERE t.table_schema NOT IN ('information_schema', 'pg_catalog')
                 ORDER BY t.table_name, c.ordinal_position
-                LIMIT 20
+                LIMIT 200
                 """
 
                 rows = await conn.fetch(tables_query)
@@ -290,7 +389,7 @@ class ExampleGenerator:
                 FROM pg_indexes
                 WHERE schemaname NOT IN ('information_schema', 'pg_catalog')
                 ORDER BY tablename, indexname
-                LIMIT 20
+                LIMIT 200
                 """
 
                 index_rows = await conn.fetch(indexes_query)
@@ -306,7 +405,7 @@ class ExampleGenerator:
                 JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
                 WHERE tc.table_schema NOT IN ('information_schema', 'pg_catalog')
                 ORDER BY tc.table_name, tc.constraint_name
-                LIMIT 20
+                LIMIT 200
                 """
 
                 constraint_rows = await conn.fetch(constraints_query)
