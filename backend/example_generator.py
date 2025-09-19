@@ -18,6 +18,24 @@ class ExampleGenerator:
         # Кэш для адаптированных примеров по профилям БД
         self._adapted_examples_cache = {}
 
+    def _clean_json_from_markdown(self, content: str) -> str:
+        """
+        Очищает JSON от markdown код блоков
+        """
+        import re
+        
+        # Удаляем markdown код блоки
+        content = re.sub(r'```json\s*', '', content)
+        content = re.sub(r'```\s*$', '', content)
+        content = content.strip()
+        
+        # Ищем JSON массив или объект
+        json_match = re.search(r'(\[.*\]|\{.*\})', content, re.DOTALL)
+        if json_match:
+            return json_match.group(1)
+        
+        return content
+
     async def generate_examples_with_llm(self) -> List[Dict[str, Any]]:
         """
         Генерирует примеры SQL запросов с помощью LLM на основе структуры БД и существующих примеров
@@ -372,8 +390,8 @@ class ExampleGenerator:
                 # Попробуем получить raw content и очистить его
                 raw_content = response.choices[0].message.content
                 if raw_content:
-                    # Удаляем markdown код блоки
-                    cleaned_content = raw_content.replace('```json', '').replace('```', '').strip()
+                    # Более надежная очистка markdown код блоков
+                    cleaned_content = self._clean_json_from_markdown(raw_content)
                     try:
                         import json
                         parsed_data = json.loads(cleaned_content)
@@ -383,6 +401,7 @@ class ExampleGenerator:
                             raise Exception("Invalid JSON structure")
                     except Exception as json_error:
                         logger.error(f"Failed to parse cleaned JSON: {json_error}")
+                        logger.error(f"Cleaned content: {cleaned_content[:200]}...")
                         return []
 
             # Преобразуем в нужный формат
@@ -525,7 +544,26 @@ class ExampleGenerator:
             )
 
             # Получаем структурированный ответ
-            result = response.choices[0].message.parsed
+            try:
+                result = response.choices[0].message.parsed
+            except Exception as parse_error:
+                logger.error(f"Failed to parse LLM response: {parse_error}")
+                # Попробуем получить raw content и очистить его
+                raw_content = response.choices[0].message.content
+                if raw_content:
+                    # Более надежная очистка markdown код блоков
+                    cleaned_content = self._clean_json_from_markdown(raw_content)
+                    try:
+                        import json
+                        parsed_data = json.loads(cleaned_content)
+                        if isinstance(parsed_data, list):
+                            result = type('Result', (), {'examples': [type('Example', (), ex) for ex in parsed_data]})()
+                        else:
+                            raise Exception("Invalid JSON structure")
+                    except Exception as json_error:
+                        logger.error(f"Failed to parse cleaned JSON: {json_error}")
+                        logger.error(f"Cleaned content: {cleaned_content[:200]}...")
+                        return []
 
             # Преобразуем в нужный формат
             examples = []
