@@ -19,6 +19,7 @@ function App() {
   const [isLoadingLLM, setIsLoadingLLM] = useState(false);
   const [error, setError] = useState(null);
   const [examples, setExamples] = useState([]);
+  const [isLoadingExamples, setIsLoadingExamples] = useState(false);
   const [activeTab, setActiveTab] = useState('query');
   const [selectedDatabase, setSelectedDatabase] = useState(null);
 
@@ -26,13 +27,22 @@ function App() {
   useEffect(() => {
     const loadExamples = async () => {
       try {
+        setIsLoadingExamples(true);
+        console.log('Loading examples for database:', selectedDatabase?.id || 'default');
         const response = await queryAnalyzerAPI.getExampleQueries(selectedDatabase?.id);
+        console.log('Loaded examples:', response.data.examples.length);
         setExamples(response.data.examples);
       } catch (error) {
         console.error('Failed to load examples:', error);
+        setExamples([]);
+      } finally {
+        setIsLoadingExamples(false);
       }
     };
-    loadExamples();
+    
+    // Добавляем небольшую задержку для обеспечения правильного порядка обновления
+    const timeoutId = setTimeout(loadExamples, 100);
+    return () => clearTimeout(timeoutId);
   }, [selectedDatabase]);
 
   const handleAnalyze = async () => {
@@ -197,6 +207,8 @@ function App() {
               onAnalyze={handleAnalyze}
               isLoading={isLoading}
               examples={examples}
+              isLoadingExamples={isLoadingExamples}
+              selectedDatabase={selectedDatabase}
             />
           </div>
         )}

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Play, Copy, RotateCcw } from 'lucide-react';
 
-const QueryEditor = ({ query, onQueryChange, onAnalyze, isLoading, examples }) => {
+const QueryEditor = ({ query, onQueryChange, onAnalyze, isLoading, examples, isLoadingExamples, selectedDatabase }) => {
   const [showExamples, setShowExamples] = useState(false);
 
   const handleExampleSelect = (exampleQuery) => {
@@ -25,9 +25,9 @@ const QueryEditor = ({ query, onQueryChange, onAnalyze, isLoading, examples }) =
           <button
             onClick={() => setShowExamples(!showExamples)}
             className="btn btn-secondary"
-            disabled={isLoading}
+            disabled={isLoading || isLoadingExamples}
           >
-            Примеры
+            {isLoadingExamples ? 'Загрузка...' : 'Примеры'}
           </button>
           <button
             onClick={handleCopy}
@@ -48,11 +48,20 @@ const QueryEditor = ({ query, onQueryChange, onAnalyze, isLoading, examples }) =
         </div>
       </div>
 
-      {showExamples && examples && (
+      {showExamples && (
         <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-          <h3 className="text-sm font-medium text-gray-700 mb-2">Примеры запросов:</h3>
+          <h3 className="text-sm font-medium text-gray-700 mb-2">
+            Примеры запросов {selectedDatabase ? `для ${selectedDatabase.name}` : '(базовая база данных)'}
+            {isLoadingExamples && <span className="text-blue-600 ml-2">(загрузка...)</span>}
+          </h3>
           <div className="space-y-2">
-            {examples.map((example, index) => (
+            {isLoadingExamples ? (
+              <div className="text-center py-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div>
+                <p className="text-sm text-gray-600 mt-2">Загрузка примеров...</p>
+              </div>
+            ) : examples && examples.length > 0 ? (
+              examples.map((example, index) => (
               <div key={index} className="border border-gray-200 rounded p-2">
                 <div className="flex items-center justify-between">
                   <div>
@@ -67,7 +76,12 @@ const QueryEditor = ({ query, onQueryChange, onAnalyze, isLoading, examples }) =
                   </button>
                 </div>
               </div>
-            ))}
+              ))
+            ) : (
+              <div className="text-center py-4">
+                <p className="text-sm text-gray-600">Примеры не найдены</p>
+              </div>
+            )}
           </div>
         </div>
       )}
